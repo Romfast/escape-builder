@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comoara ascunsa</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #0d0820; color: #fff; font-family: ui-monospace, "Courier New", monospace; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 17px; margin: 14px 0 6px; letter-spacing: .06em; text-transform: uppercase; }
+  #hud { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #b9aee0; margin-bottom: 8px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }
+  #hudLetters { display: flex; gap: 4px; }
+  #hudLetters span { width: 22px; height: 26px; border-radius: 5px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,.4); font-size: 13px; }
+  #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; }
+  canvas { border: 3px solid #36246b; border-radius: 8px; background: #18102e; max-width: calc(100vw - 16px); }
+  .help { font-size: 12px; color: #6f639e; margin: 8px 0 4px; text-align: center; padding: 0 10px; }
+  #dpad { display: flex; gap: 8px; margin: 6px 0 16px; }
+  #dpad button { width: 52px; height: 44px; font-size: 18px; border-radius: 9px; border: 1px solid #4a3590; background: #221643; color: #cdc3f0; cursor: pointer; }
+  #dpad button:active { background: var(--accent); }
+
+  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
+  .shake { animation: shake .4s ease; }
+  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }
+  #mOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.72); z-index: 20; align-items: center; justify-content: center; padding: 16px; }
+  #mCard { width: 100%; max-width: 460px; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 22px; color: #fff; font-family: system-ui, sans-serif; box-shadow: 0 18px 50px rgba(0,0,0,.5); }
+  #mCard .mtitle { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #c4b5fd; font-weight: 700; }
+  #mCard .mq { font-size: 18px; line-height: 1.45; margin: 8px 0 16px; }
+  #mCard input[type=text] { width: 100%; font: inherit; font-size: 17px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.3); color: #fff; text-align: center; box-sizing: border-box; }
+  #mCard input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  #mCard button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 11px 16px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; margin-top: 10px; box-sizing: border-box; }
+  #mCard button.opt { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); font-weight: 600; text-align: left; }
+  #mCard button.opt:hover { background: rgba(255,255,255,.2); }
+  #mCard .mfb { min-height: 20px; text-align: center; font-weight: 700; margin-top: 10px; }
+  #mCard .mfb.bad { color: #fda4af; } #mCard .mfb.good { color: #86efac; }
+  #mCard .mhint { background: none !important; color: rgba(255,255,255,.55) !important; font-weight: 600 !important; font-size: 13px; width: auto !important; display: block; margin: 10px auto 0; }
+  #mCard .mhinttext { background: rgba(255,255,255,.1); border-radius: 9px; padding: 9px 11px; font-size: 14px; margin-top: 8px; display: none; white-space: pre-line; }
+  #mCard .mclose { background: none !important; color: rgba(255,255,255,.4) !important; font-size: 12px; width: auto !important; margin: 6px auto 0; display: block; }
+  #fOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.88); z-index: 30; align-items: center; justify-content: center; padding: 16px; }
+  #fOverlay .fcard { width: 100%; max-width: 480px; text-align: center; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; padding: 28px; color: #fff; font-family: system-ui, sans-serif; }
+  #fOverlay h1 { margin: 0 0 8px; font-size: 26px; }
+  #fOverlay .fstars { font-size: 26px; letter-spacing: 4px; color: #fbbf24; margin: 6px 0; }
+  #fOverlay .fword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0; }
+  #fOverlay .fword span { width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards; }
+  @keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+  #fOverlay p { color: rgba(255,255,255,.8); line-height: 1.5; }
+  #fOverlay button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; }
+</style>
+</head>
+<body>
+<h1>Comoara ascunsa</h1>
+<div id="hud"><span id="hudStep"></span><span id="hudStars"></span><div id="hudLetters"></div></div>
+<canvas id="cv"></canvas>
+<div class="help">Sageti / WASD (da click pe joc intai). Usile rosii iti pun intrebari; cufarul auriu e scaparea.</div>
+<div id="dpad"><button data-d="L">&#9664;</button><button data-d="U">&#9650;</button><button data-d="D">&#9660;</button><button data-d="R">&#9654;</button></div>
+<div id="mOverlay"><div id="mCard">
+  <div class="mtitle" id="mTitle"></div>
+  <div class="mq" id="mQ"></div>
+  <div id="mAnswers"></div>
+  <div class="mfb" id="mFeedback"></div>
+  <button class="mhint" id="mHintBtn">Vreau un indiciu</button>
+  <div class="mhinttext" id="mHintText"></div>
+  <button class="mclose" id="mClose">Pleaca de aici</button>
+</div></div>
+<div id="fOverlay"><div class="fcard">
+  <h1>Evadare reusita!</h1>
+  <div class="fstars" id="fStars"></div>
+  <div class="fword" id="fWord"></div>
+  <p id="fMsg"></p>
+  <button id="fAgain">Joaca din nou</button>
+</div></div>
+<script>
+var CFG = {"title":"Comoara ascunsa","player":"","color":"#6d28d9","style":"arcade","charName":"Alex","story":"O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari. Rezolva fiecare puzzle ca sa aduni literele cuvantului magic.","finalMessage":"Felicitari! Ai gasit comoara!","puzzles":[{"title":"Incalzirea","type":"free","question":"Cat fac 7 x 8?","answer":"56","tfAnswer":"Adevarat","choices":"","hint":"Tabla inmultirii cu 7.","letter":"D"},{"title":"Adevarat sau fals","type":"tf","question":"Romania are iesire la Marea Neagra.","answer":"","tfAnswer":"Adevarat","choices":"","hint":"","letter":"A"},{"title":"Alege raspunsul","type":"choice","question":"Care este capitala Frantei?","answer":"","tfAnswer":"Adevarat","choices":"*Paris\nLyon\nMarsilia","hint":"Turnul Eiffel.","letter":"R"}]};
+document.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');
+var totalStars = 0;
+function el(id){ return document.getElementById(id); }
+function norm(s){ return String(s).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').replace(/,/g, '.'); }
+function starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3); }
+function finalWord(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }
+function choiceOpts(p){ return (p.choices || '').split('\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }
+function choiceCorrect(p){ var ls = (p.choices || '').split('\n'); for (var i = 0; i < ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }
+function checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); return norm(given) !== '' && norm(given) === norm(exp); }
+function beep(ok){ try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }
+function confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i < 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }
+var N = CFG.puzzles.length;
+var GW = 13, RH = 4, ROOMS = N + 1, GH = ROOMS * RH + 1;
+var TS = 38, VR = Math.min(GH, 11);
+var map = [], doorAt = {}, doorPos = [], solvedFlags = [];
+for (var y = 0; y < GH; y++) {
+  map[y] = [];
+  for (var x = 0; x < GW; x++) {
+    map[y][x] = (x === 0 || x === GW - 1 || y === 0 || y === GH - 1 || y % RH === 0) ? 1 : 0;
+  }
+}
+for (var i = 0; i < N; i++) {
+  var dy = (i + 1) * RH, dx = (i % 2 === 0) ? GW - 3 : 2;
+  map[dy][dx] = 2; doorAt[dy + '_' + dx] = i; doorPos.push({ y: dy, x: dx });
+}
+var chest = { y: (ROOMS - 1) * RH + 2, x: Math.floor(GW / 2) };
+map[chest.y][chest.x] = 4;
+var hero = { y: 2, x: Math.floor(GW / 2) - 2 };
+var finished = false;
+
+var cv = el('cv'); cv.width = GW * TS; cv.height = VR * TS;
+var ctx = cv.getContext('2d');
+
+function draw(){
+  var offY = Math.max(0, Math.min(hero.y - Math.floor(VR / 2), GH - VR));
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  for (var vy = 0; vy < VR; vy++) {
+    var y = vy + offY;
+    for (var x = 0; x < GW; x++) {
+      var t = map[y][x], px = x * TS, py = vy * TS;
+      if (t === 1) {
+        ctx.fillStyle = '#33215f'; ctx.fillRect(px, py, TS, TS);
+        ctx.fillStyle = '#241646';
+        ctx.fillRect(px, py + TS / 2 - 1, TS, 2);
+        ctx.fillRect(px + ((y % 2) ? TS / 2 : TS / 4) - 1, py, 2, TS / 2 - 1);
+      } else {
+        ctx.fillStyle = ((x + y) % 2) ? '#191130' : '#1c1336'; ctx.fillRect(px, py, TS, TS);
+        if (t === 2 || t === 3) {
+          ctx.fillStyle = t === 2 ? '#9f1239' : '#166534'; ctx.fillRect(px + 3, py + 2, TS - 6, TS - 4);
+          ctx.fillStyle = t === 2 ? '#e11d48' : '#22c55e'; ctx.fillRect(px + 6, py + 5, TS - 12, TS - 10);
+          ctx.fillStyle = '#fbbf24'; ctx.fillRect(px + TS / 2 - 2, py + TS / 2 - 2, 4, 7);
+        }
+        if (t === 4) {
+          ctx.fillStyle = '#92400e'; ctx.fillRect(px + 5, py + 10, TS - 10, TS - 16);
+          ctx.fillStyle = '#f59e0b'; ctx.fillRect(px + 5, py + 10, TS - 10, 7);
+          ctx.fillStyle = '#fde68a'; ctx.fillRect(px + TS / 2 - 2, py + 13, 4, 8);
+        }
+      }
+    }
+  }
+  var hx = hero.x * TS, hy = (hero.y - offY) * TS;
+  ctx.fillStyle = CFG.color || '#6d28d9'; ctx.fillRect(hx + 7, hy + 5, TS - 14, TS - 10);
+  ctx.fillStyle = '#fff'; ctx.fillRect(hx + 12, hy + 12, 5, 5); ctx.fillRect(hx + TS - 17, hy + 12, 5, 5);
+  ctx.fillStyle = '#0d0820'; ctx.fillRect(hx + 13, hy + 14, 2, 2); ctx.fillRect(hx + TS - 16, hy + 14, 2, 2);
+  ctx.fillStyle = '#fff'; ctx.fillRect(hx + 13, hy + TS - 14, TS - 26, 3);
+}
+
+function updateHud(){
+  var open = 0; for (var i = 0; i < N; i++) if (solvedFlags[i]) open++;
+  el('hudStep').textContent = 'Usi: ' + open + '/' + N;
+  el('hudStars').textContent = totalStars + ' \u2605';
+  var hb = el('hudLetters'); hb.innerHTML = '';
+  for (var j = 0; j < N; j++) {
+    var L = (CFG.puzzles[j].letter || '').trim();
+    if (!L) continue;
+    var s = document.createElement('span');
+    if (solvedFlags[j]) { s.textContent = L.toUpperCase(); s.className = 'won'; }
+    else s.textContent = '?';
+    hb.appendChild(s);
+  }
+}
+
+function move(dx, dy){
+  if (finished || modalOpen()) return;
+  var nx = hero.x + dx, ny = hero.y + dy;
+  if (ny < 0 || ny >= GH || nx < 0 || nx >= GW) return;
+  var t = map[ny][nx];
+  if (t === 1) return;
+  if (t === 2) { openPuzzle(doorAt[ny + '_' + nx], onDoorSolved); return; }
+  if (t === 4) { finished = true; showFinal(); return; }
+  hero.x = nx; hero.y = ny; draw();
+}
+
+function onDoorSolved(i){
+  solvedFlags[i] = true;
+  map[doorPos[i].y][doorPos[i].x] = 3;
+  updateHud(); draw();
+}
+
+window.addEventListener('keydown', function(e){
+  var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0] }[e.key];
+  if (!d) return;
+  e.preventDefault();
+  move(d[0], d[1]);
+});
+document.querySelectorAll('#dpad button').forEach(function(b){
+  b.addEventListener('click', function(){
+    var m = { U: [0, -1], D: [0, 1], L: [-1, 0], R: [1, 0] }[b.dataset.d];
+    move(m[0], m[1]);
+  });
+});
+var mIdx = -1, mAtt = 0, mHint = false, mCb = null;
+el('mHintBtn').onclick = function(){ mHint = true; el('mHintText').style.display = 'block'; };
+el('mClose').onclick = function(){ el('mOverlay').style.display = 'none'; };
+function modalOpen(){ return el('mOverlay').style.display === 'flex'; }
+function openPuzzle(i, cb){
+  mIdx = i; mAtt = 0; mHint = false; mCb = cb;
+  var p = CFG.puzzles[i];
+  el('mTitle').textContent = p.title || ('Puzzle ' + (i + 1));
+  el('mQ').textContent = p.question;
+  el('mFeedback').textContent = ''; el('mFeedback').className = 'mfb';
+  el('mHintText').style.display = 'none'; el('mHintText').textContent = p.hint || '';
+  el('mHintBtn').style.display = p.hint ? '' : 'none';
+  var box = el('mAnswers'); box.innerHTML = '';
+  if (p.type === 'free') {
+    var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = 'Scrie raspunsul...'; inp.autocomplete = 'off';
+    var b = document.createElement('button'); b.textContent = 'Verifica';
+    b.onclick = function(){ mCheck(inp.value); };
+    inp.onkeydown = function(e){ e.stopPropagation(); if (e.key === 'Enter') b.click(); };
+    box.appendChild(inp); box.appendChild(b);
+    setTimeout(function(){ inp.focus(); }, 60);
+  } else if (p.type === 'tf') {
+    ['Adevarat', 'Fals'].forEach(function(v){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = v; b.onclick = function(){ mCheck(v); }; box.appendChild(b); });
+  } else {
+    choiceOpts(p).forEach(function(o){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = o; b.onclick = function(){ mCheck(o); }; box.appendChild(b); });
+  }
+  el('mOverlay').style.display = 'flex';
+}
+function mCheck(given){
+  var p = CFG.puzzles[mIdx];
+  if (checkAnswer(p, given)) {
+    var s = starsFor(mAtt, mHint);
+    totalStars += s; beep(true);
+    el('mFeedback').textContent = 'Corect! +' + s + ' \u2605'; el('mFeedback').className = 'mfb good';
+    setTimeout(function(){ el('mOverlay').style.display = 'none'; var cb = mCb; mCb = null; if (cb) cb(mIdx, s); }, 750);
+  } else {
+    mAtt++; beep(false);
+    el('mFeedback').textContent = 'Nu e bine, mai incearca!'; el('mFeedback').className = 'mfb bad';
+    var c = el('mCard'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
+  }
+}
+function showFinal(){
+  el('fStars').textContent = totalStars + ' / ' + (CFG.puzzles.length * 3) + ' \u2605';
+  var w = finalWord(); var bw = el('fWord'); bw.innerHTML = '';
+  for (var j = 0; j < w.length; j++){ var s = document.createElement('span'); s.textContent = w.charAt(j); s.style.animationDelay = (j * 0.18) + 's'; bw.appendChild(s); }
+  var msg = CFG.finalMessage || '';
+  el('fMsg').textContent = CFG.player ? CFG.player + ', ' + msg.charAt(0).toLowerCase() + msg.slice(1) : msg;
+  el('fOverlay').style.display = 'flex';
+  beep(true); confetti();
+}
+el('fAgain').onclick = function(){ location.reload(); };
+updateHud(); draw();
+</script>
+</body>
+</html>

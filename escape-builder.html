@@ -1,0 +1,1311 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escape Room Builder</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1f2430; --muted: #6b7280;
+    --accent: #6d28d9; --accent-soft: #ede9fe; --line: #e5e7eb; --danger: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--ink); display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; }
+  header .spacer { flex: 1; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); padding: 7px 14px;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { filter: brightness(1.1); color: #fff; }
+  button.ghost { border: none; background: none; padding: 4px 6px; color: var(--muted); }
+  button.ghost:hover { color: var(--accent); }
+  button.ghost.del:hover { color: var(--danger); }
+  main { flex: 1; display: flex; min-height: 0; }
+  #editor {
+    width: 460px; min-width: 380px; overflow-y: auto; padding: 16px;
+    border-right: 1px solid var(--line); background: var(--bg);
+  }
+  #previewPane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #previewPane .bar {
+    padding: 6px 12px; font-size: 12px; color: var(--muted);
+    background: var(--panel); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px;
+  }
+  iframe { flex: 1; border: 0; width: 100%; background: #1a1033; }
+  fieldset {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+    padding: 12px 14px; margin: 0 0 14px;
+  }
+  legend { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; padding: 0 6px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--muted); margin: 10px 0 3px; }
+  label:first-of-type { margin-top: 0; }
+  input[type=text], textarea, select {
+    width: 100%; font: inherit; font-size: 14px; padding: 7px 9px;
+    border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--ink);
+  }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 54px; }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .row > div.narrow { flex: 0 0 110px; }
+  .puzzle {
+    border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin-bottom: 10px;
+  }
+  .puzzle > .head {
+    display: flex; align-items: center; gap: 6px; padding: 8px 10px; cursor: pointer; user-select: none;
+  }
+  .puzzle > .head .num {
+    background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px;
+    border-radius: 6px; padding: 2px 8px;
+  }
+  .puzzle > .head .t { flex: 1; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .puzzle > .body { padding: 0 12px 12px; border-top: 1px solid var(--line); }
+  .puzzle.closed > .body { display: none; }
+  .word {
+    font-family: ui-monospace, monospace; font-size: 18px; letter-spacing: 6px;
+    background: var(--accent-soft); color: var(--accent); border-radius: 7px;
+    padding: 6px 10px; display: inline-block; min-height: 32px;
+  }
+  .help { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  #addPuzzle { width: 100%; padding: 10px; border-style: dashed; color: var(--muted); }
+  #addPuzzle:hover { color: var(--accent); }
+  input[type=color] { border: 1px solid var(--line); border-radius: 7px; height: 34px; width: 100%; padding: 2px; background: #fff; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Escape Room Builder</h1>
+  <div class="spacer"></div>
+  <button id="btnNew">Proiect nou</button>
+  <button id="btnLoad">Incarca JSON</button>
+  <button id="btnSaveJson">Salveaza JSON</button>
+  <button id="btnExport" class="primary">Exporta jocul HTML</button>
+  <input type="file" id="fileLoad" accept=".json" hidden>
+</header>
+
+<main>
+  <section id="editor">
+    <fieldset>
+      <legend>Joc</legend>
+      <div class="row">
+        <div>
+          <label>Titlul jocului</label>
+          <input type="text" id="gTitle" data-g="title">
+        </div>
+        <div class="narrow">
+          <label>Culoare</label>
+          <input type="color" id="gColor" data-g="color">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Stil joc</label>
+          <select id="gStyle" data-g="style">
+            <option value="classic">Clasic (quiz)</option>
+            <option value="terminal">Terminal retro</option>
+            <option value="arcade">Arcade pixel</option>
+            <option value="chat">Story chat</option>
+            <option value="point">Point-and-click</option>
+          </select>
+        </div>
+        <div>
+          <label>Personaj (Story chat)</label>
+          <input type="text" id="gChar" data-g="charName" placeholder="Alex">
+        </div>
+      </div>
+      <label>Pentru cine (optional, apare in mesaje)</label>
+      <input type="text" id="gPlayer" data-g="player" placeholder="ex: Paula">
+      <label>Povestea de inceput</label>
+      <textarea id="gStory" data-g="story" rows="3"></textarea>
+      <label>Mesajul final (la castig)</label>
+      <textarea id="gFinal" data-g="finalMessage" rows="2"></textarea>
+      <label>Cuvantul final (din literele puzzle-urilor)</label>
+      <div class="word" id="finalWord">&nbsp;</div>
+      <div class="help">Se compune automat din campul "Litera" al fiecarui puzzle, in ordine.</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Puzzle-uri</legend>
+      <div id="puzzleList"></div>
+      <button id="addPuzzle">+ Adauga puzzle</button>
+    </fieldset>
+  </section>
+
+  <section id="previewPane">
+    <div class="bar">
+      <span>Preview live - jocul e jucabil aici, exact cum va arata exportat</span>
+      <div class="spacer" style="flex:1"></div>
+      <button id="btnReload" class="ghost">Reporneste jocul</button>
+    </div>
+    <iframe id="frame" title="Preview joc"></iframe>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+/* ---------- stare ---------- */
+
+const STORAGE_KEY = 'escape-builder-v1';
+
+const defaultState = () => ({
+  title: 'Comoara ascunsa',
+  player: '',
+  color: '#6d28d9',
+  style: 'classic',
+  charName: 'Alex',
+  story: 'O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari. Rezolva fiecare puzzle ca sa aduni literele cuvantului magic.',
+  finalMessage: 'Felicitari! Ai gasit comoara!',
+  puzzles: [
+    { title: 'Incalzirea', type: 'free', question: 'Cat fac 7 x 8?', answer: '56', tfAnswer: 'Adevarat', choices: '', hint: 'Tabla inmultirii cu 7.', letter: 'D' },
+    { title: 'Adevarat sau fals', type: 'tf', question: 'Romania are iesire la Marea Neagra.', answer: '', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'A' },
+    { title: 'Alege raspunsul', type: 'choice', question: 'Care este capitala Frantei?', answer: '', tfAnswer: 'Adevarat', choices: '*Paris\nLyon\nMarsilia', hint: 'Turnul Eiffel.', letter: 'R' }
+  ]
+});
+
+const blankPuzzle = () => ({ title: '', type: 'free', question: '', answer: '', tfAnswer: 'Adevarat', choices: '', hint: '', letter: '' });
+
+let state = Object.assign(defaultState(), load() || {});
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
+}
+function persist() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+/* ---------- editor ---------- */
+
+const $ = sel => document.querySelector(sel);
+const puzzleList = $('#puzzleList');
+
+function renderGlobals() {
+  document.querySelectorAll('[data-g]').forEach(el => { el.value = state[el.dataset.g]; });
+  renderWord();
+}
+
+function renderWord() {
+  const word = state.puzzles.map(p => (p.letter || '').trim().charAt(0).toUpperCase()).join('');
+  $('#finalWord').textContent = word || ' ';
+}
+
+function puzzleCard(p, i) {
+  const div = document.createElement('div');
+  div.className = 'puzzle' + (p._closed ? ' closed' : '');
+  div.dataset.i = i;
+  div.innerHTML = `
+    <div class="head">
+      <span class="num">${i + 1}</span>
+      <span class="t">${esc(p.title || p.question || 'Puzzle fara titlu')}</span>
+      <button class="ghost" data-act="up" title="Muta sus">&#9650;</button>
+      <button class="ghost" data-act="down" title="Muta jos">&#9660;</button>
+      <button class="ghost del" data-act="del" title="Sterge">&#10005;</button>
+    </div>
+    <div class="body">
+      <div class="row">
+        <div>
+          <label>Titlu scurt</label>
+          <input type="text" data-f="title" value="${esc(p.title)}">
+        </div>
+        <div class="narrow">
+          <label>Tip</label>
+          <select data-f="type">
+            <option value="free" ${p.type === 'free' ? 'selected' : ''}>Raspuns liber</option>
+            <option value="tf" ${p.type === 'tf' ? 'selected' : ''}>Adevarat / Fals</option>
+            <option value="choice" ${p.type === 'choice' ? 'selected' : ''}>Variante</option>
+          </select>
+        </div>
+      </div>
+      <label>Intrebarea</label>
+      <textarea data-f="question" rows="2">${esc(p.question)}</textarea>
+      ${p.type === 'free' ? `
+        <label>Raspunsul corect</label>
+        <input type="text" data-f="answer" value="${esc(p.answer)}">
+        <div class="help">Nu conteaza literele mari/mici sau diacriticele.</div>` : ''}
+      ${p.type === 'tf' ? `
+        <label>Raspunsul corect</label>
+        <select data-f="tfAnswer">
+          <option ${p.tfAnswer === 'Adevarat' ? 'selected' : ''}>Adevarat</option>
+          <option ${p.tfAnswer === 'Fals' ? 'selected' : ''}>Fals</option>
+        </select>` : ''}
+      ${p.type === 'choice' ? `
+        <label>Variante (una pe linie, pune * inaintea celei corecte)</label>
+        <textarea data-f="choices" rows="3">${esc(p.choices)}</textarea>` : ''}
+      <div class="row">
+        <div>
+          <label>Indiciu (optional)</label>
+          <input type="text" data-f="hint" value="${esc(p.hint)}">
+        </div>
+        <div class="narrow">
+          <label>Litera</label>
+          <input type="text" data-f="letter" maxlength="1" value="${esc(p.letter)}">
+        </div>
+      </div>
+    </div>`;
+  return div;
+}
+
+function renderPuzzles() {
+  puzzleList.innerHTML = '';
+  state.puzzles.forEach((p, i) => puzzleList.appendChild(puzzleCard(p, i)));
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* evenimente editor */
+
+document.querySelectorAll('[data-g]').forEach(el => {
+  el.addEventListener('input', () => { state[el.dataset.g] = el.value; onChange(); });
+});
+
+puzzleList.addEventListener('input', e => {
+  const f = e.target.dataset.f;
+  if (!f) return;
+  const i = +e.target.closest('.puzzle').dataset.i;
+  state.puzzles[i][f] = e.target.value;
+  if (f === 'title' || f === 'question') {
+    const card = e.target.closest('.puzzle');
+    card.querySelector('.head .t').textContent = state.puzzles[i].title || state.puzzles[i].question || 'Puzzle fara titlu';
+  }
+  if (f === 'type') { state.puzzles[i]._closed = false; renderPuzzles(); }
+  onChange();
+});
+
+puzzleList.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-act]');
+  if (btn) {
+    const card = btn.closest('.puzzle');
+    const i = +card.dataset.i;
+    const act = btn.dataset.act;
+    if (act === 'del') {
+      if (!confirm('Stergi puzzle-ul ' + (i + 1) + '?')) return;
+      state.puzzles.splice(i, 1);
+    }
+    if (act === 'up' && i > 0) [state.puzzles[i - 1], state.puzzles[i]] = [state.puzzles[i], state.puzzles[i - 1]];
+    if (act === 'down' && i < state.puzzles.length - 1) [state.puzzles[i + 1], state.puzzles[i]] = [state.puzzles[i], state.puzzles[i + 1]];
+    renderPuzzles(); onChange();
+    return;
+  }
+  const head = e.target.closest('.head');
+  if (head && !e.target.closest('input,select,textarea')) {
+    const card = head.closest('.puzzle');
+    const i = +card.dataset.i;
+    state.puzzles[i]._closed = !state.puzzles[i]._closed;
+    card.classList.toggle('closed');
+  }
+});
+
+$('#addPuzzle').addEventListener('click', () => {
+  state.puzzles.forEach(p => p._closed = true);
+  state.puzzles.push(blankPuzzle());
+  renderPuzzles(); onChange();
+  puzzleList.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  puzzleList.lastElementChild.querySelector('[data-f=title]').focus();
+});
+
+$('#btnNew').addEventListener('click', () => {
+  if (!confirm('Incepi un proiect nou? Proiectul curent se pierde (salveaza-l mai intai ca JSON daca vrei sa-l pastrezi).')) return;
+  state = defaultState();
+  renderGlobals(); renderPuzzles(); onChange();
+});
+
+$('#btnSaveJson').addEventListener('click', () => {
+  download(slug(state.title) + '.json', JSON.stringify(cleanState(), null, 2), 'application/json');
+});
+
+$('#btnLoad').addEventListener('click', () => $('#fileLoad').click());
+$('#fileLoad').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  file.text().then(txt => {
+    try {
+      const data = JSON.parse(txt);
+      if (!Array.isArray(data.puzzles)) throw new Error('format');
+      state = Object.assign(defaultState(), data);
+      renderGlobals(); renderPuzzles(); onChange();
+    } catch (err) {
+      alert('Fisierul nu este un proiect valid de escape room.');
+    }
+  });
+  e.target.value = '';
+});
+
+$('#btnExport').addEventListener('click', () => {
+  download(slug(state.title) + '.html', gameHTML(cleanState()), 'text/html');
+});
+
+$('#btnReload').addEventListener('click', refreshPreview);
+
+function cleanState() {
+  const s = JSON.parse(JSON.stringify(state));
+  s.puzzles.forEach(p => delete p._closed);
+  return s;
+}
+
+function slug(s) {
+  return (s || 'escape-room').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'escape-room';
+}
+
+function download(name, content, mime) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/* ---------- preview ---------- */
+
+let timer = null;
+function onChange() {
+  persist(); renderWord();
+  clearTimeout(timer);
+  timer = setTimeout(refreshPreview, 400);
+}
+
+function refreshPreview() {
+  $('#frame').srcdoc = gameHTML(cleanState());
+}
+
+/* ---------- template-urile jocului exportat ---------- */
+
+function gameHTML(cfg) {
+  const engines = { classic: gameClassic, terminal: gameTerminal, arcade: gameArcade, chat: gameChat, point: gamePoint };
+  return (engines[cfg.style] || gameClassic)(cfg);
+}
+
+function gameClassic(cfg) {
+  const json = JSON.stringify(cfg).replace(/</g, '\\u003c');
+  return `<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(cfg.title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: #fff; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: linear-gradient(160deg, #14092e 0%, #2a1257 55%, #14092e 100%);
+  }
+  .card {
+    width: 100%; max-width: 560px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.14); border-radius: 18px; padding: 26px;
+    backdrop-filter: blur(6px); box-shadow: 0 18px 50px rgba(0,0,0,.45);
+  }
+  h1 { margin: 0 0 6px; font-size: 26px; text-align: center; }
+  .story { color: rgba(255,255,255,.8); text-align: center; line-height: 1.5; }
+  .screen { display: none; }
+  .screen.on { display: block; animation: pop .35s ease; }
+  @keyframes pop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .progress { height: 7px; background: rgba(255,255,255,.15); border-radius: 99px; overflow: hidden; margin: 14px 0 4px; }
+  .progress i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s ease; }
+  .meta { display: flex; justify-content: space-between; font-size: 12px; color: rgba(255,255,255,.6); margin-bottom: 14px; }
+  .letters { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin: 14px 0; }
+  .tile {
+    width: 34px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 18px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18);
+    color: rgba(255,255,255,.35);
+  }
+  .tile.won { background: var(--accent); color: #fff; border-color: transparent; animation: flip .5s ease; }
+  @keyframes flip { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+  .qtitle { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-light); font-weight: 700; }
+  .question { font-size: 19px; line-height: 1.45; margin: 8px 0 18px; }
+  input[type=text] {
+    width: 100%; font: inherit; font-size: 18px; padding: 11px 13px; border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.25); color: #fff; text-align: center;
+  }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  button {
+    font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px;
+    font-weight: 700; background: var(--accent); color: #fff; width: 100%; margin-top: 10px;
+  }
+  button:hover { filter: brightness(1.12); }
+  button.opt { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); font-weight: 600; text-align: left; }
+  button.opt:hover { background: rgba(255,255,255,.18); }
+  button.hint { background: none; border: none; color: rgba(255,255,255,.55); font-weight: 600; font-size: 13px; width: auto; display: block; margin: 12px auto 0; }
+  button.hint:hover { color: #fff; }
+  .hinttext { background: rgba(255,255,255,.1); border-radius: 9px; padding: 10px 12px; font-size: 14px; margin-top: 10px; white-space: pre-line; display: none; }
+  .feedback { min-height: 22px; text-align: center; font-weight: 700; margin-top: 10px; }
+  .feedback.bad { color: #fda4af; }
+  .feedback.good { color: #86efac; }
+  .shake { animation: shake .4s ease; }
+  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }
+  .stars { text-align: center; font-size: 26px; letter-spacing: 4px; color: #fbbf24; margin: 6px 0; }
+  .bigword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 18px 0; }
+  .bigword span {
+    width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex;
+    align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flip .6s ease backwards;
+  }
+  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 5; animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="sStart" class="screen on">
+    <h1 id="gtitle"></h1>
+    <p class="story" id="gstory"></p>
+    <button id="btnStart">Incepe aventura</button>
+  </div>
+
+  <div id="sGame" class="screen">
+    <div class="progress"><i id="bar"></i></div>
+    <div class="meta"><span id="step"></span><span id="score"></span></div>
+    <div class="letters" id="lettersBar"></div>
+    <div id="qbox">
+      <div class="qtitle" id="qtitle"></div>
+      <div class="question" id="qtext"></div>
+      <div id="answers"></div>
+      <div class="feedback" id="feedback"></div>
+      <button class="hint" id="btnHint">Vreau un indiciu</button>
+      <div class="hinttext" id="hinttext"></div>
+    </div>
+  </div>
+
+  <div id="sFinal" class="screen">
+    <h1>Evadare reusita!</h1>
+    <div class="stars" id="finalStars"></div>
+    <div class="bigword" id="bigword"></div>
+    <p class="story" id="finalMsg"></p>
+    <button id="btnAgain">Joaca din nou</button>
+  </div>
+</div>
+
+<script>
+var CFG = ${json};
+document.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');
+document.documentElement.style.setProperty('--accent-light', 'color-mix(in srgb, ' + (CFG.color || '#6d28d9') + ' 40%, white)');
+
+var idx = 0, totalStars = 0, attempts = 0, hintUsed = false, won = [];
+
+function el(id) { return document.getElementById(id); }
+function norm(s) {
+  return String(s).trim().toLowerCase().normalize('NFD')
+    .replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.');
+}
+function show(id) {
+  var scr = document.querySelectorAll('.screen');
+  for (var i = 0; i < scr.length; i++) scr[i].classList.remove('on');
+  el(id).classList.add('on');
+}
+
+el('gtitle').textContent = CFG.title;
+var hello = CFG.player ? 'Salut, ' + CFG.player + '! ' : '';
+el('gstory').textContent = hello + CFG.story;
+
+el('btnStart').onclick = function () { show('sGame'); renderPuzzle(); };
+el('btnAgain').onclick = function () { location.reload(); };
+
+function lettersBar() {
+  var bar = el('lettersBar');
+  bar.innerHTML = '';
+  var any = false;
+  for (var i = 0; i < CFG.puzzles.length; i++) {
+    var L = (CFG.puzzles[i].letter || '').trim();
+    if (!L) continue;
+    any = true;
+    var d = document.createElement('div');
+    d.className = 'tile' + (won[i] ? ' won' : '');
+    d.textContent = won[i] ? L.toUpperCase() : '?';
+    bar.appendChild(d);
+  }
+  bar.style.display = any ? '' : 'none';
+}
+
+function renderPuzzle() {
+  var p = CFG.puzzles[idx];
+  attempts = 0; hintUsed = false;
+  el('bar').style.width = (idx / CFG.puzzles.length * 100) + '%';
+  el('step').textContent = 'Puzzle ' + (idx + 1) + ' din ' + CFG.puzzles.length;
+  el('score').textContent = totalStars + ' \\u2605';
+  el('qtitle').textContent = p.title || 'Puzzle ' + (idx + 1);
+  el('qtext').textContent = p.question;
+  el('feedback').textContent = ''; el('feedback').className = 'feedback';
+  el('hinttext').style.display = 'none';
+  el('hinttext').textContent = p.hint || '';
+  el('btnHint').style.display = p.hint ? '' : 'none';
+  lettersBar();
+
+  var box = el('answers');
+  box.innerHTML = '';
+  if (p.type === 'free') {
+    var inp = document.createElement('input');
+    inp.type = 'text'; inp.autocomplete = 'off'; inp.placeholder = 'Scrie raspunsul...';
+    var btn = document.createElement('button');
+    btn.textContent = 'Verifica';
+    btn.onclick = function () { check(inp.value, p.answer); };
+    inp.onkeydown = function (e) { if (e.key === 'Enter') btn.click(); };
+    box.appendChild(inp); box.appendChild(btn);
+    setTimeout(function () { inp.focus(); }, 50);
+  } else if (p.type === 'tf') {
+    ['Adevarat', 'Fals'].forEach(function (v) {
+      var b = document.createElement('button');
+      b.className = 'opt'; b.textContent = v;
+      b.onclick = function () { check(v, p.tfAnswer); };
+      box.appendChild(b);
+    });
+  } else {
+    var correct = '';
+    var opts = (p.choices || '').split('\\n').map(function (l) { return l.trim(); }).filter(Boolean);
+    opts.forEach(function (o) { if (o.charAt(0) === '*') correct = o.slice(1).trim(); });
+    opts.map(function (o) { return o.charAt(0) === '*' ? o.slice(1).trim() : o; })
+      .forEach(function (o) {
+        var b = document.createElement('button');
+        b.className = 'opt'; b.textContent = o;
+        b.onclick = function () { check(o, correct); };
+        box.appendChild(b);
+      });
+    if (!opts.length) box.textContent = '(puzzle fara variante - completeaza-le in builder)';
+  }
+}
+
+el('btnHint').onclick = function () {
+  hintUsed = true;
+  el('hinttext').style.display = 'block';
+};
+
+function check(given, expected) {
+  if (norm(given) === norm(expected) && norm(given) !== '') {
+    var stars = (hintUsed || attempts >= 2) ? 1 : (attempts === 1 ? 2 : 3);
+    totalStars += stars;
+    won[idx] = true;
+    beep(true);
+    var f = el('feedback');
+    f.textContent = 'Corect! +' + stars + ' \\u2605';
+    f.className = 'feedback good';
+    lettersBar();
+    el('bar').style.width = ((idx + 1) / CFG.puzzles.length * 100) + '%';
+    setTimeout(next, 900);
+  } else {
+    attempts++;
+    beep(false);
+    var fb = el('feedback');
+    fb.textContent = 'Nu e bine, mai incearca!';
+    fb.className = 'feedback bad';
+    var card = document.querySelector('.card');
+    card.classList.remove('shake');
+    void card.offsetWidth;
+    card.classList.add('shake');
+  }
+}
+
+function next() {
+  idx++;
+  if (idx < CFG.puzzles.length) { renderPuzzle(); return; }
+  show('sFinal');
+  var max = CFG.puzzles.length * 3;
+  el('finalStars').textContent = totalStars + ' / ' + max + ' \\u2605';
+  var word = '';
+  for (var i = 0; i < CFG.puzzles.length; i++) {
+    var L = (CFG.puzzles[i].letter || '').trim();
+    if (L) word += L.toUpperCase();
+  }
+  var bw = el('bigword');
+  bw.innerHTML = '';
+  for (var j = 0; j < word.length; j++) {
+    var s = document.createElement('span');
+    s.textContent = word.charAt(j);
+    s.style.animationDelay = (j * 0.18) + 's';
+    bw.appendChild(s);
+  }
+  var name = CFG.player ? CFG.player + ', ' : '';
+  el('finalMsg').textContent = name ? name + (CFG.finalMessage || '').charAt(0).toLowerCase() + (CFG.finalMessage || '').slice(1) : (CFG.finalMessage || '');
+  confetti();
+}
+
+function confetti() {
+  var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6'];
+  for (var i = 0; i < 90; i++) {
+    var c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.left = (i * 137 % 100) + 'vw';
+    c.style.background = colors[i % colors.length];
+    c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's';
+    c.style.animationDelay = ((i * 31 % 14) / 10) + 's';
+    document.body.appendChild(c);
+  }
+}
+
+function beep(ok) {
+  try {
+    var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
+    var t = ctx.currentTime;
+    var freqs = ok ? [523, 784] : [196];
+    freqs.forEach(function (f, k) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; o.type = 'triangle';
+      g.gain.setValueAtTime(0.12, t + k * 0.09);
+      g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3);
+    });
+  } catch (e) {}
+}
+<\/script>
+</body>
+</html>`;
+}
+
+/* ---------- biblioteca comuna pentru motoarele de joc ---------- */
+
+function libJS(cfg) {
+  const json = JSON.stringify(cfg).replace(/</g, '\\u003c');
+  return `var CFG = ${json};
+document.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');
+var totalStars = 0;
+function el(id){ return document.getElementById(id); }
+function norm(s){ return String(s).trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.'); }
+function starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3); }
+function finalWord(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }
+function choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }
+function choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i < ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }
+function checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); return norm(given) !== '' && norm(given) === norm(exp); }
+function beep(ok){ try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }
+function confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i < 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }`;
+}
+
+const SNIP = {};
+
+SNIP.baseCss = `
+  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
+  .shake { animation: shake .4s ease; }
+  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }`;
+
+SNIP.modalCss = `
+  #mOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.72); z-index: 20; align-items: center; justify-content: center; padding: 16px; }
+  #mCard { width: 100%; max-width: 460px; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 22px; color: #fff; font-family: system-ui, sans-serif; box-shadow: 0 18px 50px rgba(0,0,0,.5); }
+  #mCard .mtitle { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #c4b5fd; font-weight: 700; }
+  #mCard .mq { font-size: 18px; line-height: 1.45; margin: 8px 0 16px; }
+  #mCard input[type=text] { width: 100%; font: inherit; font-size: 17px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.3); color: #fff; text-align: center; box-sizing: border-box; }
+  #mCard input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  #mCard button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 11px 16px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; margin-top: 10px; box-sizing: border-box; }
+  #mCard button.opt { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); font-weight: 600; text-align: left; }
+  #mCard button.opt:hover { background: rgba(255,255,255,.2); }
+  #mCard .mfb { min-height: 20px; text-align: center; font-weight: 700; margin-top: 10px; }
+  #mCard .mfb.bad { color: #fda4af; } #mCard .mfb.good { color: #86efac; }
+  #mCard .mhint { background: none !important; color: rgba(255,255,255,.55) !important; font-weight: 600 !important; font-size: 13px; width: auto !important; display: block; margin: 10px auto 0; }
+  #mCard .mhinttext { background: rgba(255,255,255,.1); border-radius: 9px; padding: 9px 11px; font-size: 14px; margin-top: 8px; display: none; white-space: pre-line; }
+  #mCard .mclose { background: none !important; color: rgba(255,255,255,.4) !important; font-size: 12px; width: auto !important; margin: 6px auto 0; display: block; }`;
+
+SNIP.modalHtml = `<div id="mOverlay"><div id="mCard">
+  <div class="mtitle" id="mTitle"></div>
+  <div class="mq" id="mQ"></div>
+  <div id="mAnswers"></div>
+  <div class="mfb" id="mFeedback"></div>
+  <button class="mhint" id="mHintBtn">Vreau un indiciu</button>
+  <div class="mhinttext" id="mHintText"></div>
+  <button class="mclose" id="mClose">Pleaca de aici</button>
+</div></div>`;
+
+SNIP.modalJs = `var mIdx = -1, mAtt = 0, mHint = false, mCb = null;
+el('mHintBtn').onclick = function(){ mHint = true; el('mHintText').style.display = 'block'; };
+el('mClose').onclick = function(){ el('mOverlay').style.display = 'none'; };
+function modalOpen(){ return el('mOverlay').style.display === 'flex'; }
+function openPuzzle(i, cb){
+  mIdx = i; mAtt = 0; mHint = false; mCb = cb;
+  var p = CFG.puzzles[i];
+  el('mTitle').textContent = p.title || ('Puzzle ' + (i + 1));
+  el('mQ').textContent = p.question;
+  el('mFeedback').textContent = ''; el('mFeedback').className = 'mfb';
+  el('mHintText').style.display = 'none'; el('mHintText').textContent = p.hint || '';
+  el('mHintBtn').style.display = p.hint ? '' : 'none';
+  var box = el('mAnswers'); box.innerHTML = '';
+  if (p.type === 'free') {
+    var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = 'Scrie raspunsul...'; inp.autocomplete = 'off';
+    var b = document.createElement('button'); b.textContent = 'Verifica';
+    b.onclick = function(){ mCheck(inp.value); };
+    inp.onkeydown = function(e){ e.stopPropagation(); if (e.key === 'Enter') b.click(); };
+    box.appendChild(inp); box.appendChild(b);
+    setTimeout(function(){ inp.focus(); }, 60);
+  } else if (p.type === 'tf') {
+    ['Adevarat', 'Fals'].forEach(function(v){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = v; b.onclick = function(){ mCheck(v); }; box.appendChild(b); });
+  } else {
+    choiceOpts(p).forEach(function(o){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = o; b.onclick = function(){ mCheck(o); }; box.appendChild(b); });
+  }
+  el('mOverlay').style.display = 'flex';
+}
+function mCheck(given){
+  var p = CFG.puzzles[mIdx];
+  if (checkAnswer(p, given)) {
+    var s = starsFor(mAtt, mHint);
+    totalStars += s; beep(true);
+    el('mFeedback').textContent = 'Corect! +' + s + ' \\u2605'; el('mFeedback').className = 'mfb good';
+    setTimeout(function(){ el('mOverlay').style.display = 'none'; var cb = mCb; mCb = null; if (cb) cb(mIdx, s); }, 750);
+  } else {
+    mAtt++; beep(false);
+    el('mFeedback').textContent = 'Nu e bine, mai incearca!'; el('mFeedback').className = 'mfb bad';
+    var c = el('mCard'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
+  }
+}`;
+
+SNIP.finalCss = `
+  #fOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.88); z-index: 30; align-items: center; justify-content: center; padding: 16px; }
+  #fOverlay .fcard { width: 100%; max-width: 480px; text-align: center; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; padding: 28px; color: #fff; font-family: system-ui, sans-serif; }
+  #fOverlay h1 { margin: 0 0 8px; font-size: 26px; }
+  #fOverlay .fstars { font-size: 26px; letter-spacing: 4px; color: #fbbf24; margin: 6px 0; }
+  #fOverlay .fword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0; }
+  #fOverlay .fword span { width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards; }
+  @keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+  #fOverlay p { color: rgba(255,255,255,.8); line-height: 1.5; }
+  #fOverlay button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; }`;
+
+SNIP.finalHtml = `<div id="fOverlay"><div class="fcard">
+  <h1>Evadare reusita!</h1>
+  <div class="fstars" id="fStars"></div>
+  <div class="fword" id="fWord"></div>
+  <p id="fMsg"></p>
+  <button id="fAgain">Joaca din nou</button>
+</div></div>`;
+
+SNIP.finalJs = `function showFinal(){
+  el('fStars').textContent = totalStars + ' / ' + (CFG.puzzles.length * 3) + ' \\u2605';
+  var w = finalWord(); var bw = el('fWord'); bw.innerHTML = '';
+  for (var j = 0; j < w.length; j++){ var s = document.createElement('span'); s.textContent = w.charAt(j); s.style.animationDelay = (j * 0.18) + 's'; bw.appendChild(s); }
+  var msg = CFG.finalMessage || '';
+  el('fMsg').textContent = CFG.player ? CFG.player + ', ' + msg.charAt(0).toLowerCase() + msg.slice(1) : msg;
+  el('fOverlay').style.display = 'flex';
+  beep(true); confetti();
+}
+el('fAgain').onclick = function(){ location.reload(); };`;
+
+/* ---------- motor: terminal retro ---------- */
+
+function gameTerminal(cfg) {
+  return `<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(cfg.title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #04130a; color: #39ff6e; font-family: "Courier New", ui-monospace, monospace; }
+  #crt { max-width: 760px; margin: 0 auto; padding: 20px 16px 80px; }
+  .line { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: 15px; text-shadow: 0 0 7px rgba(57,255,110,.5); }
+  .line.dim { color: #1f9c4a; }
+  .line.warn { color: #ffd24a; text-shadow: 0 0 7px rgba(255,210,74,.45); }
+  .line.bad { color: #ff6b6b; text-shadow: 0 0 7px rgba(255,107,107,.45); }
+  .line.ok { color: #9dffc0; }
+  #inline { display: flex; gap: 8px; align-items: baseline; font-size: 15px; text-shadow: 0 0 7px rgba(57,255,110,.5); }
+  #cmd { flex: 1; background: none; border: none; outline: none; color: inherit; font: inherit; text-shadow: inherit; caret-color: #39ff6e; }
+  .scan { position: fixed; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0,0,0,.28) 0 1px, transparent 1px 3px); }
+  .vign { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.6)); }
+</style>
+</head>
+<body>
+<div class="scan"></div><div class="vign"></div>
+<div id="crt"><div id="out"></div>
+<div id="inline"><span>&gt;</span><input id="cmd" autocomplete="off" autofocus spellcheck="false"></div>
+</div>
+<script>
+${libJS(cfg)}
+var idx = -1, attempts = 0, hintUsed = false, done = false;
+var solved = [];
+var out = el('out'), cmd = el('cmd');
+document.body.addEventListener('click', function(){ cmd.focus(); });
+
+var queue = [], typing = false;
+function say(lines, cls, cb){ queue.push({ lines: lines.slice(), cls: cls || '', cb: cb }); pump(); }
+function pump(){
+  if (typing) return;
+  var job = queue[0];
+  if (!job) return;
+  if (!job.lines.length) { queue.shift(); if (job.cb) job.cb(); pump(); return; }
+  var text = job.lines.shift();
+  typing = true;
+  var d = document.createElement('div');
+  d.className = 'line ' + job.cls;
+  out.appendChild(d);
+  var i = 0;
+  (function tick(){
+    d.textContent = text.slice(0, i);
+    i += 3;
+    window.scrollTo(0, document.body.scrollHeight);
+    if (i <= text.length + 2) setTimeout(tick, 11);
+    else { d.textContent = text; typing = false; pump(); }
+  })();
+}
+function echo(text, cls){ var d = document.createElement('div'); d.className = 'line ' + (cls || ''); d.textContent = text; out.appendChild(d); window.scrollTo(0, document.body.scrollHeight); }
+
+function collected(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += solved[i] ? L.toUpperCase() + ' ' : '_ '; } return w.trim() || '(niciuna)'; }
+
+var bar = '==============================================';
+say([bar, '  ' + CFG.title.toUpperCase(), bar, ' ', (CFG.player ? CFG.player + ', ' : '') + CFG.story, ' ', 'Comenzi: INDICIU, LITERE, AJUTOR. In rest, scrie raspunsul si apasa Enter.'], '', nextPuzzle);
+
+function nextPuzzle(){
+  idx++; attempts = 0; hintUsed = false;
+  if (idx >= CFG.puzzles.length) return finale();
+  var p = CFG.puzzles[idx];
+  var lines = [' ', '----------------------------------------------', '[' + (idx + 1) + '/' + CFG.puzzles.length + '] ' + (p.title || 'OBSTACOL').toUpperCase(), p.question];
+  if (p.type === 'tf') lines.push('(raspunde: ADEVARAT sau FALS)');
+  if (p.type === 'choice') { var o = choiceOpts(p); for (var i = 0; i < o.length; i++) lines.push('  ' + (i + 1) + ') ' + o[i]); }
+  say(lines);
+}
+
+function finale(){
+  done = true;
+  var w = finalWord().split('').join(' ');
+  var lines = [' ', bar, '   E V A D A R E   R E U S I T A', bar, 'Stele: ' + totalStars + ' / ' + (CFG.puzzles.length * 3)];
+  if (w) lines.push('Cuvantul magic: ' + w);
+  lines.push((CFG.player ? CFG.player + ', ' : '') + CFG.finalMessage);
+  lines.push(' ');
+  lines.push('Scrie RESTART pentru a juca din nou.');
+  say(lines, 'ok');
+  beep(true);
+}
+
+cmd.addEventListener('keydown', function(e){
+  if (e.key !== 'Enter') return;
+  var v = cmd.value.trim();
+  cmd.value = '';
+  if (!v) return;
+  echo('> ' + v, 'dim');
+  var n = norm(v);
+  if (done) { if (n === 'restart') location.reload(); else echo('Scrie RESTART pentru a juca din nou.', 'dim'); return; }
+  if (n === 'ajutor' || n === 'help') { say(['INDICIU = primesti un ajutor (dar pierzi stele)', 'LITERE  = literele adunate pana acum', 'Orice altceva e tratat ca raspuns.']); return; }
+  if (n === 'litere') { say(['Litere adunate: ' + collected()]); return; }
+  var p = CFG.puzzles[idx];
+  if (!p) return;
+  if (n === 'indiciu' || n === 'hint') {
+    if (p.hint) { hintUsed = true; say(['INDICIU: ' + p.hint], 'warn'); }
+    else say(['Nu exista niciun indiciu aici.'], 'warn');
+    return;
+  }
+  var given = v;
+  if (p.type === 'choice') { var num = parseInt(v, 10); var o = choiceOpts(p); if (num >= 1 && o[num - 1]) given = o[num - 1]; }
+  if (p.type === 'tf') { if (n === 'a' || n === 'adevarat') given = 'Adevarat'; if (n === 'f' || n === 'fals') given = 'Fals'; }
+  if (checkAnswer(p, given)) {
+    var s = starsFor(attempts, hintUsed);
+    totalStars += s; solved[idx] = true; beep(true);
+    var ls = ['>> ACCES PERMIS. +' + s + ' stele (total ' + totalStars + ')'];
+    var L = (p.letter || '').trim();
+    if (L) ls.push('>> AI GASIT LITERA: ' + L.toUpperCase() + '   [' + collected() + ']');
+    say(ls, 'ok', nextPuzzle);
+  } else {
+    attempts++; beep(false);
+    say(['>> ACCES RESPINS. Mai incearca.'], 'bad');
+  }
+});
+<\/script>
+</body>
+</html>`;
+}
+
+/* ---------- motor: arcade pixel ---------- */
+
+function gameArcade(cfg) {
+  return `<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(cfg.title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #0d0820; color: #fff; font-family: ui-monospace, "Courier New", monospace; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 17px; margin: 14px 0 6px; letter-spacing: .06em; text-transform: uppercase; }
+  #hud { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #b9aee0; margin-bottom: 8px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }
+  #hudLetters { display: flex; gap: 4px; }
+  #hudLetters span { width: 22px; height: 26px; border-radius: 5px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,.4); font-size: 13px; }
+  #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; }
+  canvas { border: 3px solid #36246b; border-radius: 8px; background: #18102e; max-width: calc(100vw - 16px); }
+  .help { font-size: 12px; color: #6f639e; margin: 8px 0 4px; text-align: center; padding: 0 10px; }
+  #dpad { display: flex; gap: 8px; margin: 6px 0 16px; }
+  #dpad button { width: 52px; height: 44px; font-size: 18px; border-radius: 9px; border: 1px solid #4a3590; background: #221643; color: #cdc3f0; cursor: pointer; }
+  #dpad button:active { background: var(--accent); }
+${SNIP.baseCss}${SNIP.modalCss}${SNIP.finalCss}
+</style>
+</head>
+<body>
+<h1>${esc(cfg.title)}</h1>
+<div id="hud"><span id="hudStep"></span><span id="hudStars"></span><div id="hudLetters"></div></div>
+<canvas id="cv"></canvas>
+<div class="help">Sageti / WASD (da click pe joc intai). Usile rosii iti pun intrebari; cufarul auriu e scaparea.</div>
+<div id="dpad"><button data-d="L">&#9664;</button><button data-d="U">&#9650;</button><button data-d="D">&#9660;</button><button data-d="R">&#9654;</button></div>
+${SNIP.modalHtml}
+${SNIP.finalHtml}
+<script>
+${libJS(cfg)}
+var N = CFG.puzzles.length;
+var GW = 13, RH = 4, ROOMS = N + 1, GH = ROOMS * RH + 1;
+var TS = 38, VR = Math.min(GH, 11);
+var map = [], doorAt = {}, doorPos = [], solvedFlags = [];
+for (var y = 0; y < GH; y++) {
+  map[y] = [];
+  for (var x = 0; x < GW; x++) {
+    map[y][x] = (x === 0 || x === GW - 1 || y === 0 || y === GH - 1 || y % RH === 0) ? 1 : 0;
+  }
+}
+for (var i = 0; i < N; i++) {
+  var dy = (i + 1) * RH, dx = (i % 2 === 0) ? GW - 3 : 2;
+  map[dy][dx] = 2; doorAt[dy + '_' + dx] = i; doorPos.push({ y: dy, x: dx });
+}
+var chest = { y: (ROOMS - 1) * RH + 2, x: Math.floor(GW / 2) };
+map[chest.y][chest.x] = 4;
+var hero = { y: 2, x: Math.floor(GW / 2) - 2 };
+var finished = false;
+
+var cv = el('cv'); cv.width = GW * TS; cv.height = VR * TS;
+var ctx = cv.getContext('2d');
+
+function draw(){
+  var offY = Math.max(0, Math.min(hero.y - Math.floor(VR / 2), GH - VR));
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  for (var vy = 0; vy < VR; vy++) {
+    var y = vy + offY;
+    for (var x = 0; x < GW; x++) {
+      var t = map[y][x], px = x * TS, py = vy * TS;
+      if (t === 1) {
+        ctx.fillStyle = '#33215f'; ctx.fillRect(px, py, TS, TS);
+        ctx.fillStyle = '#241646';
+        ctx.fillRect(px, py + TS / 2 - 1, TS, 2);
+        ctx.fillRect(px + ((y % 2) ? TS / 2 : TS / 4) - 1, py, 2, TS / 2 - 1);
+      } else {
+        ctx.fillStyle = ((x + y) % 2) ? '#191130' : '#1c1336'; ctx.fillRect(px, py, TS, TS);
+        if (t === 2 || t === 3) {
+          ctx.fillStyle = t === 2 ? '#9f1239' : '#166534'; ctx.fillRect(px + 3, py + 2, TS - 6, TS - 4);
+          ctx.fillStyle = t === 2 ? '#e11d48' : '#22c55e'; ctx.fillRect(px + 6, py + 5, TS - 12, TS - 10);
+          ctx.fillStyle = '#fbbf24'; ctx.fillRect(px + TS / 2 - 2, py + TS / 2 - 2, 4, 7);
+        }
+        if (t === 4) {
+          ctx.fillStyle = '#92400e'; ctx.fillRect(px + 5, py + 10, TS - 10, TS - 16);
+          ctx.fillStyle = '#f59e0b'; ctx.fillRect(px + 5, py + 10, TS - 10, 7);
+          ctx.fillStyle = '#fde68a'; ctx.fillRect(px + TS / 2 - 2, py + 13, 4, 8);
+        }
+      }
+    }
+  }
+  var hx = hero.x * TS, hy = (hero.y - offY) * TS;
+  ctx.fillStyle = CFG.color || '#6d28d9'; ctx.fillRect(hx + 7, hy + 5, TS - 14, TS - 10);
+  ctx.fillStyle = '#fff'; ctx.fillRect(hx + 12, hy + 12, 5, 5); ctx.fillRect(hx + TS - 17, hy + 12, 5, 5);
+  ctx.fillStyle = '#0d0820'; ctx.fillRect(hx + 13, hy + 14, 2, 2); ctx.fillRect(hx + TS - 16, hy + 14, 2, 2);
+  ctx.fillStyle = '#fff'; ctx.fillRect(hx + 13, hy + TS - 14, TS - 26, 3);
+}
+
+function updateHud(){
+  var open = 0; for (var i = 0; i < N; i++) if (solvedFlags[i]) open++;
+  el('hudStep').textContent = 'Usi: ' + open + '/' + N;
+  el('hudStars').textContent = totalStars + ' \\u2605';
+  var hb = el('hudLetters'); hb.innerHTML = '';
+  for (var j = 0; j < N; j++) {
+    var L = (CFG.puzzles[j].letter || '').trim();
+    if (!L) continue;
+    var s = document.createElement('span');
+    if (solvedFlags[j]) { s.textContent = L.toUpperCase(); s.className = 'won'; }
+    else s.textContent = '?';
+    hb.appendChild(s);
+  }
+}
+
+function move(dx, dy){
+  if (finished || modalOpen()) return;
+  var nx = hero.x + dx, ny = hero.y + dy;
+  if (ny < 0 || ny >= GH || nx < 0 || nx >= GW) return;
+  var t = map[ny][nx];
+  if (t === 1) return;
+  if (t === 2) { openPuzzle(doorAt[ny + '_' + nx], onDoorSolved); return; }
+  if (t === 4) { finished = true; showFinal(); return; }
+  hero.x = nx; hero.y = ny; draw();
+}
+
+function onDoorSolved(i){
+  solvedFlags[i] = true;
+  map[doorPos[i].y][doorPos[i].x] = 3;
+  updateHud(); draw();
+}
+
+window.addEventListener('keydown', function(e){
+  var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0] }[e.key];
+  if (!d) return;
+  e.preventDefault();
+  move(d[0], d[1]);
+});
+document.querySelectorAll('#dpad button').forEach(function(b){
+  b.addEventListener('click', function(){
+    var m = { U: [0, -1], D: [0, 1], L: [-1, 0], R: [1, 0] }[b.dataset.d];
+    move(m[0], m[1]);
+  });
+});
+${SNIP.modalJs}
+${SNIP.finalJs}
+updateHud(); draw();
+<\/script>
+</body>
+</html>`;
+}
+
+/* ---------- motor: story chat ---------- */
+
+function gameChat(cfg) {
+  return `<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(cfg.title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b1220; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #e5e7eb; display: flex; justify-content: center; min-height: 100vh; }
+  #app { width: 100%; max-width: 480px; height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: #0f172a; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 14px; background: #1e293b; border-bottom: 1px solid #334155; }
+  .avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; color: #fff; }
+  .cname { font-weight: 700; }
+  .cstatus { font-size: 12px; color: #34d399; }
+  #msgs { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; }
+  .row.me { justify-content: flex-end; }
+  .bub { max-width: 78%; padding: 9px 13px; border-radius: 16px; line-height: 1.4; font-size: 15px; white-space: pre-line; animation: bin .25s ease; }
+  @keyframes bin { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .row.him .bub { background: #1e293b; border-bottom-left-radius: 5px; }
+  .row.me .bub { background: var(--accent); color: #fff; border-bottom-right-radius: 5px; }
+  .bub.tile { font-size: 24px; font-weight: 800; letter-spacing: 2px; background: #14532d; border: 1px solid #22c55e; }
+  .bub.typing i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; margin: 0 2px; animation: tp 1s infinite; }
+  .bub.typing i:nth-child(2) { animation-delay: .15s; } .bub.typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes tp { 30% { transform: translateY(-5px); } }
+  #composer { padding: 10px 12px; background: #1e293b; border-top: 1px solid #334155; display: flex; flex-wrap: wrap; gap: 8px; min-height: 58px; }
+  #composer input { flex: 1; min-width: 120px; font: inherit; font-size: 15px; padding: 9px 13px; border-radius: 99px; border: 1px solid #475569; background: #0f172a; color: #fff; }
+  #composer input:focus { outline: none; border-color: var(--accent); }
+  #composer button { font: inherit; cursor: pointer; border: none; border-radius: 99px; padding: 9px 16px; font-weight: 600; background: var(--accent); color: #fff; }
+  #composer button.chip { background: #0f172a; border: 1px solid #475569; color: #cbd5e1; }
+  #composer button.chip:hover { border-color: var(--accent); color: #fff; }
+${SNIP.baseCss}${SNIP.finalCss}
+</style>
+</head>
+<body>
+<div id="app">
+  <header><div class="avatar" id="av"></div><div><div class="cname" id="cn"></div><div class="cstatus" id="cs">online</div></div></header>
+  <div id="msgs"></div>
+  <div id="composer"></div>
+</div>
+${SNIP.finalHtml}
+<script>
+${libJS(cfg)}
+var who = (CFG.charName || 'Alex').trim() || 'Alex';
+el('cn').textContent = who; el('av').textContent = who.charAt(0).toUpperCase();
+var msgs = el('msgs'), composer = el('composer');
+var idx = -1, attempts = 0, hintUsed = false;
+var wrongs = ['Nu... nu a mers. Mai incearca!', 'Hmm, nu e asta. Gandeste-te bine!', 'Tot incuiat. Alta idee?'];
+
+function scrollEnd(){ msgs.scrollTop = msgs.scrollHeight; }
+function bubble(side, text, cls){
+  var r = document.createElement('div'); r.className = 'row ' + side;
+  var b = document.createElement('div'); b.className = 'bub' + (cls ? ' ' + cls : '');
+  b.textContent = text;
+  r.appendChild(b); msgs.appendChild(r); scrollEnd();
+  return b;
+}
+function charMsg(text, cb){
+  el('cs').textContent = 'scrie...';
+  var b = bubble('him', '', 'typing');
+  b.innerHTML = '<i></i><i></i><i></i>';
+  var d = Math.min(450 + text.length * 14, 1800);
+  setTimeout(function(){
+    b.className = 'bub'; b.textContent = text;
+    el('cs').textContent = 'online'; scrollEnd();
+    if (cb) setTimeout(cb, 280);
+  }, d);
+}
+function seq(texts, cb){ var i = 0; (function n(){ if (i >= texts.length) { if (cb) cb(); return; } charMsg(texts[i++], n); })(); }
+
+function storyChunks(){
+  var parts = (CFG.story || '').match(/[^.!?]+[.!?]*\\s*/g) || [];
+  var out = [], cur = '';
+  for (var i = 0; i < parts.length; i++) {
+    if (cur && (cur + parts[i]).length > 110) { out.push(cur.trim()); cur = ''; }
+    cur += parts[i];
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out.length ? out : [CFG.story || ''];
+}
+
+function setComposer(p){
+  composer.innerHTML = '';
+  function chip(label, fn, cls){ var b = document.createElement('button'); if (cls) b.className = cls; b.textContent = label; b.onclick = fn; composer.appendChild(b); return b; }
+  if (p.type === 'free') {
+    var inp = document.createElement('input'); inp.placeholder = 'Scrie raspunsul...'; inp.autocomplete = 'off';
+    composer.appendChild(inp);
+    var send = chip('Trimite', function(){ if (inp.value.trim()) { var v = inp.value.trim(); inp.value = ''; answer(v); } });
+    inp.onkeydown = function(e){ if (e.key === 'Enter') send.click(); };
+    setTimeout(function(){ inp.focus(); }, 100);
+  } else if (p.type === 'tf') {
+    chip('Adevarat', function(){ answer('Adevarat'); }, 'chip');
+    chip('Fals', function(){ answer('Fals'); }, 'chip');
+  } else {
+    choiceOpts(p).forEach(function(o){ chip(o, function(){ answer(o); }, 'chip'); });
+  }
+  if (p.hint) chip('Cere un indiciu', function(){ hintUsed = true; bubble('me', 'Ai vreun indiciu?'); composer.innerHTML = ''; charMsg(p.hint, function(){ setComposer(p); }); }, 'chip');
+}
+
+function answer(given){
+  var p = CFG.puzzles[idx];
+  bubble('me', given);
+  composer.innerHTML = '';
+  if (checkAnswer(p, given)) {
+    var s = starsFor(attempts, hintUsed);
+    totalStars += s; beep(true);
+    var L = (p.letter || '').trim();
+    charMsg('Da! Asta era! (+' + s + ' \\u2605, total ' + totalStars + ')', function(){
+      if (L) { bubble('him', L.toUpperCase(), 'tile'); charMsg('Am gasit o litera!', next); }
+      else next();
+    });
+  } else {
+    attempts++; beep(false);
+    charMsg(wrongs[(attempts - 1) % wrongs.length], function(){ setComposer(p); });
+  }
+}
+
+function next(){
+  idx++; attempts = 0; hintUsed = false;
+  if (idx >= CFG.puzzles.length) {
+    seq(['AM IESIT! Multumesc' + (CFG.player ? ', ' + CFG.player : '') + '!', CFG.finalMessage || ''], function(){ showFinal(); });
+    return;
+  }
+  var p = CFG.puzzles[idx];
+  seq([(p.title ? p.title + '. ' : '') + p.question], function(){ setComposer(p); });
+}
+
+seq(['Salut' + (CFG.player ? ', ' + CFG.player : '') + '!'].concat(storyChunks()).concat(['Ma ajuti sa ies de aici?']), next);
+${SNIP.finalJs}
+<\/script>
+</body>
+</html>`;
+}
+
+/* ---------- motor: point-and-click ---------- */
+
+function gamePoint(cfg) {
+  return `<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(cfg.title)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #0d0820; color: #fff; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 19px; margin: 14px 0 4px; }
+  #hud { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #b9aee0; margin-bottom: 4px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }
+  #hudLetters { display: flex; gap: 4px; }
+  #hudLetters span { width: 22px; height: 26px; border-radius: 5px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,.4); font-size: 13px; }
+  #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; }
+  .note { font-size: 13px; color: #8d80bb; margin: 2px 0 10px; text-align: center; padding: 0 12px; min-height: 18px; }
+  #stage { width: 100%; max-width: 860px; padding: 0 10px 20px; }
+  svg { width: 100%; height: auto; border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.5); display: block; }
+  .hot { cursor: pointer; }
+  .hot:hover { filter: brightness(1.35) drop-shadow(0 0 6px rgba(255,255,255,.35)); }
+  .hot.done { opacity: .6; cursor: default; }
+  .hot.done:hover { filter: none; }
+  #door { cursor: pointer; }
+  #door.open { filter: drop-shadow(0 0 12px #22c55e); }
+${SNIP.baseCss}${SNIP.modalCss}${SNIP.finalCss}
+</style>
+</head>
+<body>
+<h1>${esc(cfg.title)}</h1>
+<div id="hud"><span id="hudStep"></span><span id="hudStars"></span><div id="hudLetters"></div></div>
+<div class="note" id="note">Cerceteaza camera: da click pe obiecte si rezolva-le ca sa deschizi usa.</div>
+<div id="stage"><svg id="scene" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg"></svg></div>
+${SNIP.modalHtml}
+${SNIP.finalHtml}
+<script>
+${libJS(cfg)}
+var N = CFG.puzzles.length, solvedFlags = [], solvedCount = 0;
+
+var POOL = [
+  { name: 'Ceasul', x: 308, y: 62, svg: '<circle cx="32" cy="32" r="30" fill="#caa856"/><circle cx="32" cy="32" r="24" fill="#f4ecd8"/><line x1="32" y1="32" x2="32" y2="16" stroke="#222" stroke-width="3"/><line x1="32" y1="32" x2="43" y2="36" stroke="#222" stroke-width="3"/><circle cx="32" cy="32" r="2.5" fill="#222"/>' },
+  { name: 'Tabloul', x: 108, y: 84, svg: '<rect width="84" height="64" fill="#8a5a2b"/><rect x="6" y="6" width="72" height="52" fill="#b7d3e8"/><polygon points="10,52 34,24 50,44 60,32 74,52" fill="#4f7a4f"/><circle cx="62" cy="16" r="6" fill="#f7d774"/>' },
+  { name: 'Sertarul biroului', x: 64, y: 300, svg: '<rect width="150" height="14" fill="#7a4a22"/><rect x="6" y="14" width="138" height="46" fill="#925a2c"/><rect x="20" y="22" width="110" height="28" fill="#7a4a22"/><circle cx="75" cy="36" r="4" fill="#f3cf6d"/><rect x="10" y="60" width="10" height="34" fill="#7a4a22"/><rect x="130" y="60" width="10" height="34" fill="#7a4a22"/>' },
+  { name: 'Dulapul', x: 232, y: 228, svg: '<rect width="92" height="142" fill="#8a5a2b"/><rect x="5" y="5" width="38" height="132" fill="#a06a35"/><rect x="49" y="5" width="38" height="132" fill="#a06a35"/><circle cx="38" cy="72" r="3.5" fill="#f3cf6d"/><circle cx="54" cy="72" r="3.5" fill="#f3cf6d"/>' },
+  { name: 'Fereastra', x: 424, y: 62, svg: '<rect width="96" height="120" fill="#6b7f9e"/><rect x="6" y="6" width="84" height="108" fill="#101d3a"/><line x1="48" y1="6" x2="48" y2="114" stroke="#6b7f9e" stroke-width="5"/><line x1="6" y1="60" x2="90" y2="60" stroke="#6b7f9e" stroke-width="5"/><circle cx="68" cy="32" r="11" fill="#f4f1de"/>' },
+  { name: 'Raftul cu carti', x: 558, y: 78, svg: '<rect y="34" width="120" height="8" fill="#7a4a22"/><rect x="6" y="6" width="13" height="28" fill="#b54a4a"/><rect x="21" y="2" width="13" height="32" fill="#4a7ab5"/><rect x="36" y="8" width="13" height="26" fill="#54a05e"/><rect x="51" y="4" width="13" height="30" fill="#c2a23e"/><rect x="66" y="9" width="13" height="25" fill="#9a5ab5"/><rect x="81" y="5" width="13" height="29" fill="#b5764a"/><rect x="96" y="8" width="13" height="26" fill="#5aa0b5"/>' },
+  { name: 'Cutia', x: 404, y: 330, svg: '<rect width="66" height="50" fill="#925a2c"/><line x1="0" y1="0" x2="66" y2="50" stroke="#7a4a22" stroke-width="5"/><line x1="66" y1="0" x2="0" y2="50" stroke="#7a4a22" stroke-width="5"/><rect width="66" height="50" fill="none" stroke="#7a4a22" stroke-width="6"/>' },
+  { name: 'Lampa', x: 516, y: 252, svg: '<polygon points="14,0 50,0 60,34 4,34" fill="#d9a23e"/><rect x="29" y="34" width="6" height="78" fill="#555"/><rect x="12" y="112" width="40" height="8" rx="3" fill="#555"/><circle cx="32" cy="17" r="9" fill="#ffe9a8" opacity=".8"/>' },
+  { name: 'Seiful', x: 596, y: 300, svg: '<rect width="74" height="74" rx="6" fill="#5b6470"/><rect x="7" y="7" width="60" height="60" rx="4" fill="#434b55"/><circle cx="37" cy="37" r="14" fill="#5b6470"/><circle cx="37" cy="37" r="9" fill="#2c3138"/><line x1="37" y1="28" x2="37" y2="37" stroke="#d4d4d4" stroke-width="2.5"/>' },
+  { name: 'Covorul', x: 250, y: 432, svg: '<ellipse cx="110" cy="26" rx="110" ry="26" fill="#7a3b56"/><ellipse cx="110" cy="26" rx="80" ry="17" fill="#94506c"/><ellipse cx="110" cy="26" rx="46" ry="9" fill="#7a3b56"/>' }
+];
+function crate(i){ return { name: 'Lada ' + (i + 1), x: 50 + ((i - 10) % 8) * 86, y: 408, svg: POOL[6].svg }; }
+
+var base = '<rect width="800" height="380" fill="#3b2a63"/><rect y="380" width="800" height="120" fill="#241a3f"/><rect y="372" width="800" height="8" fill="#1c1336"/>'
+  + '<g id="door"><rect x="694" y="148" width="86" height="232" fill="#6b4226"/><rect x="702" y="156" width="70" height="216" fill="#8a5a2b"/><circle cx="712" cy="266" r="5" fill="#f3cf6d"/><g id="lock"><rect x="730" y="250" width="26" height="22" rx="4" fill="#caa856"/><path d="M735 250 v-7 a8 8 0 0 1 16 0 v7" fill="none" stroke="#caa856" stroke-width="4"/></g></g>';
+var objs = '';
+for (var i = 0; i < N; i++) {
+  var o = POOL[i] || crate(i);
+  objs += '<g class="hot" data-i="' + i + '" transform="translate(' + o.x + ',' + o.y + ')">' + o.svg + '<title>' + o.name + '</title></g>';
+}
+el('scene').innerHTML = base + objs;
+
+el('scene').addEventListener('click', function(e){
+  var t = e.target;
+  var g = t.closest ? t.closest('g.hot') : null;
+  if (g) {
+    if (!g.classList.contains('done')) openPuzzle(+g.getAttribute('data-i'), onSolved);
+    return;
+  }
+  var door = t.closest ? t.closest('#door') : null;
+  if (door) {
+    if (solvedCount >= N) { showFinal(); }
+    else { beep(false); el('note').textContent = 'Usa e incuiata! Mai ai ' + (N - solvedCount) + ' obiecte de cercetat.'; }
+  }
+});
+
+function onSolved(i){
+  solvedFlags[i] = true; solvedCount++;
+  var g = document.querySelector('g.hot[data-i="' + i + '"]');
+  g.classList.add('done');
+  var L = (CFG.puzzles[i].letter || '').trim();
+  g.innerHTML += '<circle cx="0" cy="0" r="13" fill="#16a34a"/><text x="0" y="5" text-anchor="middle" font-size="14" font-weight="700" fill="#fff">' + (L ? L.toUpperCase() : '\\u2713') + '</text>';
+  updateHud();
+  if (solvedCount >= N) {
+    el('door').classList.add('open');
+    el('note').textContent = 'Toate obiectele rezolvate! Da click pe usa ca sa evadezi.';
+    beep(true);
+  }
+}
+
+function updateHud(){
+  el('hudStep').textContent = 'Obiecte: ' + solvedCount + '/' + N;
+  el('hudStars').textContent = totalStars + ' \\u2605';
+  var hb = el('hudLetters'); hb.innerHTML = '';
+  for (var j = 0; j < N; j++) {
+    var L = (CFG.puzzles[j].letter || '').trim();
+    if (!L) continue;
+    var s = document.createElement('span');
+    if (solvedFlags[j]) { s.textContent = L.toUpperCase(); s.className = 'won'; }
+    else s.textContent = '?';
+    hb.appendChild(s);
+  }
+}
+${SNIP.modalJs}
+${SNIP.finalJs}
+updateHud();
+<\/script>
+</body>
+</html>`;
+}
+
+/* ---------- start ---------- */
+
+renderGlobals();
+renderPuzzles();
+refreshPreview();
+</script>
+</body>
+</html>
