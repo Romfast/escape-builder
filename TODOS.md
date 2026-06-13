@@ -54,10 +54,12 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
         dpad fizic; Chat header frosted + bule distincte + tile reward; Point fundal distinct +
         fix contrast `.note` + ușă glow. `prefers-reduced-motion` peste tot. Toate 5 demo-uri
         regenerate. Smoke 21/21 + capturi pe fiecare stil.
-- [!] **S4 — extinde `tests/smoke.mjs`** *(blocat de S3)* — bomberman, hartă, audio, regresie.
+- [x] **S4 — extinde `tests/smoke.mjs`** *(GATA — 24/24)* — 3 teste noi: audio S1 (ctx running),
+      navigare overworld (mers tastatură + ieșire blocată), bomberman gameplay (bombă/AI/respawn).
+      Arbore AGENTS.md actualizat 21→24.
 
-**Stare la 2026-06-13:** PR1 livrat (`a42c960`, suita 21/21). Iterația 2 = neîncepută;
-`scratch/` are doar artefacte PR1, fără proto-uri noi.
+**Stare la 2026-06-13:** PR1 livrat (`a42c960`). **Iterația 2 COMPLETĂ** — S1+S2+S3+S4 livrate
+și verificate. Suita 24/24. Comituri: S1 `52f97af`, S2c `a9f3065`, S3 `4454df9` (+pas1/pas2).
 
 ---
 

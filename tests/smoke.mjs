@@ -944,4 +944,112 @@ test.describe('Campanie E2E @campanie', () => {
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 9 (S4): Audio — AudioContext deblocat la "Incepe aventura" (S1)
+  // ─────────────────────────────────────────────────────────────────────
+  test('audio — AudioContext deblocat la Incepe aventura (S1) @campanie',
+    async ({ page }) => {
+      const cfg = campaignCfg(3, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'audio');
+      const gp = await page.context().newPage();
+      try {
+        await gp.goto('file://' + tmpPath);
+        // Inainte de gest: ctx inexistent (creat lazy)
+        const before = await gp.evaluate(
+          () => (window.beep && window.beep._ctx) ? window.beep._ctx.state : 'NO_CTX'
+        );
+        expect(before, 'ctx nu trebuie sa existe inainte de gest').toBe('NO_CTX');
+        // Gestul pe parinte deblocheaza ctx-ul
+        await gp.locator('#btn-start').click();
+        await gp.waitForTimeout(200);
+        const after = await gp.evaluate(
+          () => (window.beep && window.beep._ctx) ? window.beep._ctx.state : 'NO_CTX'
+        );
+        expect(after, 'ctx trebuie running dupa Incepe aventura').toBe('running');
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+    });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 10 (S4): Overworld — mers cu tastatura + iesire blocata pana la final
+  // ─────────────────────────────────────────────────────────────────────
+  test('overworld — mers cu tastatura + iesire blocata pana la final @campanie',
+    async ({ page }) => {
+      const cfg = campaignCfg(3, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'ow-nav');
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+        await waitOverworld(gp);
+
+        // Mers cu tastatura: ArrowRight muta jucatorul o celula la dreapta
+        const p0 = await gp.evaluate(() => window.__ow.state.player);
+        await gp.locator('body').press('ArrowRight');
+        const p1 = await gp.evaluate(() => window.__ow.state.player);
+        expect(p1.col, 'jucatorul nu s-a miscat cu tastatura').toBe(p0.col + 1);
+
+        // Iesirea (steag) e blocata pana la rezolvarea tuturor camerelor
+        expect(await gp.evaluate(() => window.__ow.state.allDone)).toBe(false);
+        await gp.evaluate(() => window.__ow.enterExit());
+        const finaleShown = await gp.evaluate(
+          () => document.getElementById('finale')?.classList.contains('show')
+        );
+        expect(finaleShown, 'finalul nu trebuie sa apara cu iesirea blocata').toBe(false);
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(gameErrors, gameErrors.join('\n')).toHaveLength(0);
+    });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 11 (S4): Arcade Bomberman — bomba/AI/respawn pe demo-ul generat
+  // ─────────────────────────────────────────────────────────────────────
+  test('arcade bomberman — bomba sparge cutie + AI urmareste + respawn pastreaza progres @regresie',
+    async ({ page }) => {
+      const errors = trackErrors(page);
+      await page.goto(fileURL('exemplu-arcade.html'));
+      await page.waitForFunction(() => typeof window.__game !== 'undefined', { timeout: 5000 });
+      await page.evaluate(() => { window.__seed = 42; window.__game.restartWithSeed(42); });
+
+      // Stare initiala: 3 vieti, dusmani prezenti
+      const init = await page.evaluate(() => ({ lives: window.__game.lives, enemies: window.__game.enemiesCount }));
+      expect(init.lives).toBe(3);
+      expect(init.enemies).toBeGreaterThan(0);
+
+      // Bomba sparge o cutie adiacenta
+      await page.evaluate(() => window.__game.setTile(2, 1, 2));
+      expect(await page.evaluate(() => window.__game.getTile(2, 1))).toBe(2);
+      await page.evaluate(() => { window.__game.placeBomb(); window.__game.explodeAllBombs(); });
+      expect(await page.evaluate(() => window.__game.getTile(2, 1)), 'cutia nu s-a distrus').toBe(0);
+
+      // AI: cu cale libera, BFS returneaza un pas care se apropie de jucator
+      const step = await page.evaluate(() => {
+        const m = window.__game.map;
+        for (let y = 0; y < m.length; y++) for (let x = 0; x < m[0].length; x++) if (m[y][x] === 2) window.__game.setTile(x, y, 0);
+        return window.__game.bfsStep(7, 7, 1, 1);
+      });
+      expect(step, 'BFS nu a gasit cale spre jucator').not.toBeNull();
+      expect(Math.abs(step.x - 1) + Math.abs(step.y - 1)).toBeLessThan((7 - 1) + (7 - 1));
+
+      // Respawn pastreaza progresul puzzle
+      await page.evaluate(() => window.__game.solveDoor(0));
+      await page.evaluate(() => window.__game.killPlayer());
+      await page.waitForTimeout(1800);
+      const st = await page.evaluate(() => ({
+        lives: window.__game.lives,
+        solved: window.__game.puzzleProgress.doorsSolved[0],
+        alive: window.__game.player.alive
+      }));
+      expect(st.lives, 'viata nu a scazut').toBe(2);
+      expect(st.solved, 'progresul puzzle s-a pierdut la respawn').toBe(true);
+      expect(st.alive, 'jucatorul nu a respawnat').toBe(true);
+
+      expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
 });
