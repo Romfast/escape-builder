@@ -23,14 +23,16 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
       Fix: deblocare ctx în handler-ul `btn-start` (gest direct pe părinte), `escape-builder.html:1928`.
       Verificat: `scratch/verify-audio-s1.mjs` → ctx `running` după start (era `NO_CTX`). Smoke 21/21.
       TODO la S4: portează asertarea `beep._ctx.state==='running'` în `tests/smoke.mjs`.
-- [ ] **S2a — prototip Bomberman complet** → `scratch/bomberman-proto.html`
+- [~] **S2a — prototip Bomberman complet** → `scratch/bomberman-proto.html`
       Standalone jucabil: dușmani cu AI urmărire, bombe plasabile + explozii în lanț, blocuri
       distructibile, pericole, vieți + game-over + respawn fără pierderea progresului puzzle,
       plasare ALEATOARE cufere/uși/blocuri. Păstrează `openPuzzle` pe uși roșii + cufăr auriu = scăpare.
-- [ ] **S2b — prototip hartă overworld** → `scratch/overworld-proto.html`
+- [~] **S2b — prototip hartă overworld** → `scratch/overworld-proto.html`
       Personaj top-down care intră pe ușă → încarcă camera → revine pe hartă. Înlocuiește coridorul
       static. Respectă contractul campaniei: iframe per cameră, `parent.nextRoom`/`roomReady`.
-- [ ] **S2c — `STYLES.md`** — direcție restyle pentru cele 5 stiluri individuale.
+- [x] **S2c — `STYLES.md`** — direcție restyle pentru cele 5 stiluri (GATA, 775 linii).
+      Top 3 impact/efort: terminal `.line.dim` fix WCAG (3.1:1→6.1:1); classic card glow +
+      progres bar; chat header `backdrop-filter` + bulă NPC distinctă. Consumat de S3.
 - [!] **S3 — integrare în `escape-builder.html`** *(blocat de S2a+S2b+S2c)*
       Portează prototipurile (template literals → DUBLEAZĂ backslash-urile) + regenerează demo-urile.
 - [!] **S4 — extinde `tests/smoke.mjs`** *(blocat de S3)* — bomberman, hartă, audio, regresie.
