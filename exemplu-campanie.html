@@ -195,6 +195,52 @@ body {
 }
 .btn-main:hover { filter: brightness(1.1); }
 .btn-main:disabled { opacity: .5; cursor: not-allowed; }
+.btn-sec {
+  font: inherit; font-size: 15px; font-weight: 700;
+  background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.22);
+  border-radius: 12px; padding: 12px 24px; cursor: pointer; min-height: 44px;
+  width: 100%; max-width: 320px;
+}
+.btn-sec:hover { background: rgba(255,255,255,.2); }
+.btn-main:focus-visible, .btn-sec:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+.fin-actions, .dipl-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+/* ----- Diplomă A4 print-first (§Design pct.9) ----- */
+#diploma { background: #0d0620; gap: 16px; }
+.dipl-sheet {
+  width: 100%; max-width: 520px; aspect-ratio: 210 / 297; background: #fff; color: #1a1333;
+  border-radius: 6px; box-shadow: 0 18px 50px rgba(0,0,0,.5);
+  display: flex; padding: 10px; overflow: hidden;
+}
+.dipl-frame {
+  flex: 1; border: 3px double var(--accent); border-radius: 4px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 2.2%; padding: 6% 7%; text-align: center;
+}
+.dipl-title { font-family: Georgia, "Times New Roman", serif; font-weight: 700; letter-spacing: .04em;
+  font-size: clamp(20px, 5.2vw, 30px); color: var(--accent); }
+.dipl-sub { font-size: clamp(11px, 2.4vw, 13px); color: #6b6480; text-transform: uppercase; letter-spacing: .12em; }
+.dipl-name { font-size: clamp(26px, 7vw, 42px); font-weight: 800; line-height: 1.05; color: #1a1333; word-break: break-word; }
+.dipl-game { font-size: clamp(12px, 2.8vw, 15px); color: #4a4360; font-style: italic; }
+.dipl-rooms { display: flex; flex-direction: column; gap: 3px; width: 100%; max-width: 320px; margin-top: 2%; }
+.dipl-rooms .dipl-room { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: clamp(11px, 2.4vw, 13px); color: #4a4360; border-bottom: 1px dotted rgba(0,0,0,.12); padding: 2px 0; }
+.dipl-rooms .dipl-room .rstars { color: #c8952a; letter-spacing: 1px; white-space: nowrap; }
+.dipl-rooms .dipl-room .rskip { color: #9a93ad; }
+.dipl-wordlbl { font-size: clamp(10px, 2.2vw, 12px); text-transform: uppercase; letter-spacing: .12em; color: #6b6480; margin-top: 2%; }
+.dipl-word { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.dipl-word span { width: clamp(24px, 7vw, 38px); aspect-ratio: 5 / 6; background: var(--accent); color: #fff;
+  border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: clamp(15px, 4vw, 22px); font-weight: 800; }
+.dipl-word span.lock { background: #d8d3e4; color: #6b6480; }
+.dipl-footer { margin-top: auto; font-size: clamp(10px, 2.2vw, 12px); color: #6b6480; line-height: 1.5; }
+.dipl-footer .dipl-expired { color: #c8952a; }
+@media print {
+  body * { visibility: hidden !important; }
+  #diploma, #diploma * { visibility: visible !important; }
+  #diploma { position: fixed; inset: 0; display: flex !important; background: #fff !important; padding: 0; }
+  .dipl-actions { display: none !important; }
+  .dipl-sheet { box-shadow: none; max-width: none; width: auto; height: auto; margin: 20mm; aspect-ratio: 210 / 297; }
+  .dipl-title, .dipl-word span, .dipl-frame { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 .btn-skip {
   font: inherit; font-size: 15px; font-weight: 700;
   background: #4b5563; color: #fff; border: none;
@@ -258,6 +304,30 @@ body {
     <p>Cuvântul magic:</p>
     <div id="fin-word"></div>
     <p id="fin-msg"></p>
+    <div class="fin-actions">
+      <button class="btn-main" id="btn-diploma">Vezi diploma &rarr;</button>
+      <button class="btn-sec" id="btn-replay">Joacă din nou</button>
+    </div>
+  </div>
+
+  <!-- Diplomă A4 print-first (§Design pct.9) — populată la „Vezi diploma" -->
+  <div id="diploma" class="overlay" aria-hidden="true">
+    <div class="dipl-sheet" role="document" aria-label="Diplomă de evadare">
+      <div class="dipl-frame">
+        <div class="dipl-title">DIPLOMĂ DE EVADARE</div>
+        <div class="dipl-sub">se acordă lui</div>
+        <div class="dipl-name" id="dipl-name"></div>
+        <div class="dipl-game" id="dipl-game"></div>
+        <div class="dipl-rooms" id="dipl-rooms"></div>
+        <div class="dipl-wordlbl">Cuvântul magic</div>
+        <div class="dipl-word" id="dipl-word"></div>
+        <div class="dipl-footer" id="dipl-footer"></div>
+      </div>
+    </div>
+    <div class="dipl-actions">
+      <button class="btn-main" id="dipl-print">Printează diploma</button>
+      <button class="btn-sec" id="dipl-back">&larr; Înapoi</button>
+    </div>
   </div>
 </div>
 
@@ -284,6 +354,7 @@ document.documentElement.style.setProperty('--accent', MASTER.color || '#6d28d9'
 var N          = MASTER.puzzles.length;
 var totalStars = 0;
 var collected  = [];
+var roomStars  = []; /* stele per cameră — pentru diplomă (§Design pct.9) */
 var skipped    = {};
 
 var activeIdx    = -1;
@@ -301,7 +372,7 @@ var _RESUME_KEY = 'esc-camp-' + djb2(JSON.stringify(MASTER));
 function safeGet(){ try{ return JSON.parse(sessionStorage.getItem(_RESUME_KEY)); }catch(e){ return null; } }
 function safeSet(v){ try{ sessionStorage.setItem(_RESUME_KEY, JSON.stringify(v)); }catch(e){ /* webview restrictat — continuă fără resume */ } }
 function saveProgress(){
-  safeSet({ idx: activeIdx, totalStars: totalStars, collected: collected.slice(), skipped: skipped });
+  safeSet({ idx: activeIdx, totalStars: totalStars, collected: collected.slice(), roomStars: roomStars.slice(), skipped: skipped });
 }
 function clearProgress(){ try{ sessionStorage.removeItem(_RESUME_KEY); sessionStorage.removeItem(_DEADLINE_KEY); }catch(e){} }
 
@@ -390,6 +461,7 @@ var frameEl     = document.getElementById('room-frame');
 var introEl     = document.getElementById('intro');
 var skipEl      = document.getElementById('skip-banner');
 var finaleEl    = document.getElementById('finale');
+var diplomaEl   = document.getElementById('diploma');
 
 /* ----- Dots ----- */
 function buildDots(){
@@ -512,6 +584,7 @@ window.nextRoom = function(data){
   clearTimeout(readyTimer);
   roomDone[idx] = true;
   totalStars += (data.stars || 0);
+  roomStars[idx] = (data.stars || 0); /* pentru diplomă */
   var letter = String(data.letter || '').replace(/[^A-Za-z0-9]/g,'').charAt(0).toUpperCase();
   if(letter) collected.push(letter);
   setDot(idx,'done');
@@ -642,6 +715,43 @@ function showFinale(){
   voiceSay(document.getElementById('fin-msg').textContent); /* citește mesajul final (D10) */
 }
 
+/* ----- Diplomă A4 (§Design pct.9) — populată la „Vezi diploma" ----- */
+function _starStr(n){ n = Math.max(0, Math.min(3, n|0)); var s = ''; for(var i=0;i<3;i++) s += i<n ? '\u2605' : '\u2606'; return s; }
+function buildDiploma(){
+  document.getElementById('dipl-name').textContent = (MASTER.player||'').trim() || 'Campion';
+  document.getElementById('dipl-game').textContent = '\u201E' + (MASTER.title||'') + '\u201D';
+  var rooms = document.getElementById('dipl-rooms'); rooms.innerHTML = '';
+  for(var i=0;i<N;i++){
+    var row = document.createElement('div'); row.className = 'dipl-room';
+    var lab = document.createElement('span'); lab.textContent = 'Camera ' + (i+1);
+    var val = document.createElement('span');
+    if(skipped[i]){ val.className = 'rskip'; val.textContent = '\uD83D\uDD12 s\u0103rit\u0103'; }
+    else { val.className = 'rstars'; val.textContent = _starStr(roomStars[i]||0); }
+    row.appendChild(lab); row.appendChild(val); rooms.appendChild(row);
+  }
+  var w = document.getElementById('dipl-word'); w.innerHTML = '';
+  collected.forEach(function(l){ var s = document.createElement('span'); s.textContent = l; w.appendChild(s); });
+  Object.keys(skipped).forEach(function(){ var s = document.createElement('span'); s.className = 'lock'; s.textContent = '\uD83D\uDD12'; w.appendChild(s); });
+  var foot = '';
+  try{ foot = new Date().toLocaleDateString('ro-RO', {year:'numeric', month:'long', day:'numeric'}); }catch(e){ foot = ''; }
+  var cre = (MASTER.creator||'').trim(); if(cre) foot += ' \u00b7 creat de ' + cre;
+  var fEl = document.getElementById('dipl-footer'); fEl.textContent = foot;
+  if(_timerExpired){ var ex = document.createElement('div'); ex.className = 'dipl-expired'; ex.textContent = 'timpul a expirat'; fEl.appendChild(ex); }
+}
+function showDiploma(){
+  buildDiploma();
+  finaleEl.classList.remove('show');
+  diplomaEl.classList.add('show'); diplomaEl.setAttribute('aria-hidden','false');
+}
+function hideDiploma(){
+  diplomaEl.classList.remove('show'); diplomaEl.setAttribute('aria-hidden','true');
+  finaleEl.classList.add('show');
+}
+document.getElementById('btn-diploma').onclick = showDiploma;
+document.getElementById('dipl-back').onclick   = hideDiploma;
+document.getElementById('dipl-print').onclick  = function(){ try{ window.print(); }catch(e){} };
+document.getElementById('btn-replay').onclick  = function(){ clearProgress(); location.reload(); };
+
 /* ----- Confetti ----- */
 function confetti(){
   var colors=[MASTER.color||'#6d28d9','#fbbf24','#34d399','#60a5fa','#f472b6'];
@@ -657,7 +767,7 @@ function confetti(){
 var overworldEl = document.getElementById('overworld');
 function hideAll(){
   voiceCancel(); /* fără replici fantomă la schimbarea scenei (D10) */
-  [introEl,overworldEl,skipEl,finaleEl].forEach(function(el){ el.classList.remove('show'); });
+  [introEl,overworldEl,skipEl,finaleEl,diplomaEl].forEach(function(el){ el.classList.remove('show'); });
 }
 
 /* ===== Overworld (S3 pas2 — hartă top-down care înlocuiește coridorul) =====
@@ -835,6 +945,7 @@ buildDots();
   /* restaurăm starea */
   totalStars = saved.totalStars || 0;
   collected  = saved.collected  || [];
+  roomStars  = saved.roomStars  || [];
   skipped    = saved.skipped    || {};
   Object.keys(skipped).forEach(function(k){ roomDone[+k] = true; setDot(+k,'done'); });
   /* repornim pe hartă, la ușa camerei next */

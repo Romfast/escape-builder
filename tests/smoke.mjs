@@ -791,6 +791,63 @@ test.describe('Campanie E2E @campanie', () => {
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  test('diploma — „Vezi diploma" arata certificat A4 cu nume/stele-per-camera/cuvant/creator, inapoi (§Design pct.9)',
+    async ({ page }) => {
+      test.setTimeout(120000);
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(3, 'classic');
+      cfg.player = 'Maria';
+      cfg.creator = 'Doamna Ana';
+      const tmpPath = await writeCampaignHtml(page, cfg, 'diploma');
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+        for (let i = 0; i < 3; i++) {
+          await enterRoom(gp, i);
+          await solveRoom(gp, 'classic', 'r' + (i + 1));
+        }
+        await gp.waitForFunction(() => document.getElementById('finale')?.classList.contains('show'),
+          null, { timeout: 10000 });
+
+        // Buton „Vezi diploma" → diploma vizibila, finale ascunsa
+        await gp.locator('#btn-diploma').click();
+        await expect(gp.locator('#diploma')).toBeVisible();
+        await expect(gp.locator('#finale')).not.toBeVisible();
+
+        // Numele copilului (cel mai mare element) + titlul jocului
+        await expect(gp.locator('#dipl-name')).toHaveText('Maria');
+        await expect(gp.locator('#dipl-game')).toContainText('Test Campanie');
+
+        // Rand de stele per camera: 3 randuri, fiecare cu ★ (rezolvate, nu sarite)
+        await expect(gp.locator('#dipl-rooms .dipl-room')).toHaveCount(3);
+        const firstRoom = await gp.locator('#dipl-rooms .dipl-room .rstars').first().innerText();
+        expect(firstRoom).toMatch(/[★☆]{3}/);
+
+        // Cuvantul magic in dale (3 litere colectate, A B C)
+        await expect(gp.locator('#dipl-word span')).toHaveCount(3);
+
+        // Footer: data + „creat de Doamna Ana"
+        await expect(gp.locator('#dipl-footer')).toContainText('creat de Doamna Ana');
+
+        // Butonul de print exista (nu il apasam — window.print blocheaza headless)
+        await expect(gp.locator('#dipl-print')).toBeVisible();
+
+        // Inapoi → finale din nou
+        await gp.locator('#dipl-back').click();
+        await expect(gp.locator('#finale')).toBeVisible();
+        await expect(gp.locator('#diploma')).not.toBeVisible();
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
   // ─────────────────────────────────────────────────────────────────────
   // Test 3: Camera moartă — timeout 4s → skip-banner + cod eroare
   // ─────────────────────────────────────────────────────────────────────

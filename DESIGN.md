@@ -217,7 +217,10 @@ Mesajul creatorului
 
 ## 10. Diplomă — Certificat A4 Print-First (§Design pct. 9 — Etapa 2 / PR2)
 
-> Implementare în T10/PR2. Spec inclusă aici ca parte a contractului de design.
+> **LIVRAT** (2026-06-13). Overlay `#diploma`; buton „Vezi diploma →" pe finale + „Joacă din nou".
+> `buildDiploma()` citește `roomStars`/`collected`/`skipped`/`MASTER`/`_timerExpired`. Câmp builder nou
+> `creator` („Creat de"). `@media print` izolează `#diploma` (rest `visibility:hidden`). Test smoke
+> „diploma" (nume/titlu/stele-per-cameră/cuvânt/creator/înapoi). Camere sărite = 🔒 (verificat vizual).
 
 - **Format:** A4 portret, fundal ALB, chenar dublu `var(--c-accent)`
 - **Titlu:** „DIPLOMĂ DE EVADARE" — **singurul** element cu font serif (limbajul certificatelor)

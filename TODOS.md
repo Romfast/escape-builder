@@ -18,7 +18,7 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
 - [x] **Audit a11y motoare** — LIVRAT (vezi §dedicată mai jos). Smoke 26/26.
 
 **PR2 livrat (2026-06-13):** audio camere `651025b`, voce `da93d84`, unificare `ab11089`, a11y (acest commit).
-Rămas din Etapa 2: Adventure Mode v0 (+ Diplomă §Design pct.9). (D7 + Timer Calm + Muzică T10 LIVRATE.)
+Rămas din Etapa 2: Adventure Mode v0. (D7 + Timer Calm + Muzică T10 + Diplomă LIVRATE — vezi §§ mai jos.)
 
 ### [x] Bomberman polish (feedback user 2026-06-13) — LIVRAT
 Trei probleme raportate + o lipsă, toate în `gameArcade` (`escape-builder.html`):
@@ -95,6 +95,16 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
 ---
 
 ## Post-PR1 (după ship-ul campaniei)
+
+### [x] Diplomă A4 print-first (§Design pct.9) — LIVRAT (2026-06-13)
+Certificat A4 portret, fundal alb, chenar dublu accent, titlu serif „DIPLOMĂ DE EVADARE" (singurul serif),
+numele copilului = cel mai mare element. Overlay `#diploma`; buton „Vezi diploma →" pe finale (+ „Joacă
+din nou"). `buildDiploma()` randează: rând de stele per cameră (★★★/★★☆; camere sărite = 🔒 „sărită"),
+cuvântul magic în dăle (aceeași iconografie ca finalul, lacăte pentru sărite), footer = dată +
+„creat de {creator}" + marcaj auriu „timpul a expirat" (dacă `_timerExpired`). Câmp builder nou `creator`.
+Per-cameră `roomStars[]` (persistat în resume). `@media print` izolează `#diploma` (rest `visibility:hidden`,
+`margin:20mm`, `print-color-adjust:exact`). Verificat: smoke 31/31 (test nou „diploma") + screenshot
+(`scratch/diploma.png`: A4, 🔒 cameră sărită, footer expirat). Rămas din Etapa 2: doar Adventure Mode v0.
 
 ### [x] Timer Calm (§Design pct.10 / T10) — LIVRAT (2026-06-13)
 Ceas M:SS în bara chrome a campaniei. Opt-in din builder (câmp „Timp limită (minute)", default 0 = fără;
