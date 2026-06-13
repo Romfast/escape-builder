@@ -14,7 +14,7 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
 - [x] **Audio camere** — fix REAL (vezi S1 mai jos, commit `651025b`): unlock pe primul gest global
   (acoperă resume), nu doar btn-start; test rescris (headless crea ctx `running` trivial).
 - [x] **Narațiune vocală (D10)** — LIVRAT (vezi §„Narațiune vocală" mai jos). Smoke 25/25.
-- [ ] **Unificare `finale()` terminal pe `SNIP.finalJs`** (vezi §dedicată mai jos).
+- [x] **Unificare contract `_campaign` la final** — `libJS.campaignDone()` (vezi §dedicată mai jos).
 - [ ] **Audit a11y motoare** (vezi §dedicată mai jos).
 
 ---
@@ -101,11 +101,27 @@ Verificat: smoke 25/25 (test nou „voce — naratiune opt-in") + live MCP (buto
 NOTĂ scope: motoarele NU cheamă încă `parent.voiceSay` (am evitat dublu-citit cu roomReady); dacă
 pe viitor vrei replici chat citite individual, adaugă în `charMsg` cu guard `typeof parent.voiceSay`.
 
-### Unificarea `finale()` din terminal pe `SNIP.finalJs` (PR2 primul pas)
-- Astăzi terminalul are propria funcție `finale()` (escape-builder.html:863) care NU folosește `SNIP.finalJs`.
-- Migrarea pe SNIP.finalJs deblochează ramura `_campaign` uniformă pentru toate cele 5 motoare.
-- Prim pas al Etapei 2 (D7): migrarea `gameClassic` pe `libJS+SNIP` → regresie manuală pe classic.
-- Referință: planul §Etapa 2 pct. 1; D7.
+### [x] Unificarea contractului `_campaign` la final — `libJS.campaignDone()` (LIVRAT)
+**Decizie de design (abatere de la formularea inițială):** NU am pus terminalul pe `showFinal()`
+din `SNIP.finalJs`. Motiv: `showFinal()` randează un modal mov `#fOverlay`, iar terminalul are
+finale stilizat în CRT (ASCII „EVADARE REUSITA" + comandă `RESTART`) — e on-theme intenționat;
+forțarea modalului ar fi o **regresie vizuală** pe terminalul standalone.
+Ce am unificat în schimb (adevărata duplicare): payload-ul `parent.nextRoom({idx,stars,letter})`
+era scris identic în 3 locuri (terminal `finale()`, `SNIP.finalJs showFinal()`, classic `next()`).
+Acum trăiește o singură dată în `libJS.campaignDone()` (lângă `roomReady`/`beep`/`onerror`).
+- terminal `finale()` ramura `_campaign` → `say([... CAMERA REZOLVATA ...], 'ok', campaignDone)`.
+- `SNIP.finalJs showFinal()` ramura `_campaign` → `campaignDone()`.
+- arcade/chat/point folosesc `showFinal` → primesc automat `campaignDone`.
+- **classic rămâne bespoke** (nu folosește `libJS`) → contractul lui e încă inline. Pliere completă
+  = D7 (migrarea `gameClassic` pe `libJS+SNIP`, cu regresie manuală pe classic). RĂMAs DE FĂCUT.
+Verificat: smoke 25/25 (terminal standalone test 2 + camere terminal în campanie E2E test 1).
+Referință: planul §Etapa 2 pct. 1; D7.
+
+### [ ] D7 rămas: migrarea `gameClassic` pe `libJS+SNIP`
+- Classic (escape-builder.html:451) e singurul motor bespoke: propriul `totalStars`, `beep`,
+  inline `finalWord` (dublat de 2 ori în `next()`), propriul modal final `#sFinal`.
+- După migrare: classic folosește `libJS.campaignDone()` + `SNIP` ca celelalte 4 → 5/5 uniform.
+- Necesită regresie manuală pe classic standalone (e demo-ul implicit, cel mai vizibil).
 
 ### Audit a11y motoare existente (post-PR1, sub harness Playwright)
 - **Ținte tap ≥ 44px**: dpad arcade, butoane tf/choice, butonul "Trimite" din chat.
