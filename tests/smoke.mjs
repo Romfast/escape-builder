@@ -526,21 +526,19 @@ test.describe('Campanie E2E @campanie', () => {
   }
 
   /**
-   * Asteapta coridorul si apasa "Deschide usa".
-   * Asteapta si ca coridorul sa dispara (mountRoom apelat) inainte de return —
-   * asta garanteaza ca data-room-ready al camerei precedente a fost sters.
+   * Harta overworld (înlocuiește coridorul, S3 pas2): după ce o cameră e gata,
+   * orchestratorul arată harta cu jucătorul. Testele conduc harta via __ow.
    */
-  async function openCorridor(gp) {
+  async function waitOverworld(gp) {
     await gp.waitForFunction(
-      () => document.getElementById('corridor')?.classList.contains('show'),
+      () => window.__ow && window.__ow.state.active,
       null, { timeout: 10000 }
     );
-    await gp.locator('#btn-next').click();
-    // Asteapta inchiderea coridorului (mountRoom apelat dupa 280ms animatie)
-    await gp.waitForFunction(
-      () => !document.getElementById('corridor')?.classList.contains('show'),
-      null, { timeout: 3000 }
-    );
+  }
+  /** Intră pe ușa camerei `idx` (echivalent cu mersul jucătorului pe hartă). */
+  async function enterRoom(gp, idx) {
+    await waitOverworld(gp);
+    await gp.evaluate((i) => window.__ow.enterDoor(i), idx);
   }
 
   // ─────────────────────────────────────────────────────────────────────
@@ -566,8 +564,8 @@ test.describe('Campanie E2E @campanie', () => {
         const styles = ['classic', 'terminal', 'arcade', 'chat', 'point'];
 
         for (let i = 0; i < 5; i++) {
+          await enterRoom(gp, i);
           await solveRoom(gp, styles[i], 'r' + (i + 1));
-          if (i < 4) await openCorridor(gp);
         }
 
         // Finale trebuie sa apara
@@ -598,7 +596,7 @@ test.describe('Campanie E2E @campanie', () => {
   // ─────────────────────────────────────────────────────────────────────
   // Test 2: Resume — reload mid-campanie revine la coridor
   // ─────────────────────────────────────────────────────────────────────
-  test('resume — reload mid-campanie returneaza la coridor (safeStore D3+D11) @campanie',
+  test('resume — reload mid-campanie returneaza la harta (safeStore D3+D11) @campanie',
     async ({ page }) => {
       const errors = trackErrors(page);
       const cfg = campaignCfg(3, 'classic');
@@ -611,20 +609,22 @@ test.describe('Campanie E2E @campanie', () => {
         await gp.locator('#btn-start').click();
 
         // Rezolva camera 0 (classic)
+        await enterRoom(gp, 0);
         await solveRoom(gp, 'classic', 'r1');
 
-        // Asteapta coridorul — saveProgress() a fost apelat, sesionStorage are progresul
-        await gp.waitForFunction(
-          () => document.getElementById('corridor')?.classList.contains('show'),
-          null, { timeout: 10000 }
-        );
+        // Asteapta harta — saveProgress() a fost apelat, sessionStorage are progresul
+        await waitOverworld(gp);
 
-        // Reload — tryResume() trebuie sa redeschida coridorul, NU intro-ul
+        // Reload — tryResume() trebuie sa redeschida HARTA, NU intro-ul
         await gp.reload();
         await gp.waitForLoadState('domcontentloaded');
 
-        // Coridorul trebuie sa fie vizibil
-        await expect(gp.locator('#btn-next')).toBeVisible({ timeout: 5000 });
+        // Harta trebuie sa fie activa
+        await gp.waitForFunction(
+          () => window.__ow && window.__ow.state.active &&
+                document.getElementById('overworld')?.classList.contains('show'),
+          null, { timeout: 5000 }
+        );
 
         // Intro-ul NU trebuie sa fie vizibil
         const introVisible = await gp.locator('#btn-start').isVisible();
@@ -666,6 +666,7 @@ test.describe('Campanie E2E @campanie', () => {
         });
 
         await gp.locator('#btn-start').click();
+        await enterRoom(gp, 0); // monteaza camera moarta (fara roomReady) → timeout 4s
 
         // Timeout 4s → skip-banner apare in max 9s (4s timeout + 5s marja)
         await gp.waitForFunction(
@@ -684,11 +685,9 @@ test.describe('Campanie E2E @campanie', () => {
         // Camera urmatoare (idx=1) se poate deschide
         await gp.locator('#btn-skip').click();
 
-        // Coridorul sau direct camera urmatoare (daca N>2 ramane coridor)
-        // Inlocuim si al doilea template sa se deschida coridorul
-        // skipRoom → showSkipBanner → btn-skip → idx+1 < N → showCorridor
+        // skipRoom → showSkipBanner → btn-skip → idx+1 < N → showOverworld(next)
         await gp.waitForFunction(
-          () => document.getElementById('corridor')?.classList.contains('show') ||
+          () => (window.__ow && window.__ow.state.active) ||
                 document.getElementById('skip-banner')?.classList.contains('show'),
           null, { timeout: 5000 }
         );
@@ -717,6 +716,7 @@ test.describe('Campanie E2E @campanie', () => {
       try {
         await gp.goto('file://' + tmpPath);
         await gp.locator('#btn-start').click();
+        await enterRoom(gp, 0);
 
         // Asteapta roomReady pentru camera 0 (data-room-ready setat)
         await gp.waitForFunction(
@@ -751,7 +751,7 @@ test.describe('Campanie E2E @campanie', () => {
   // ─────────────────────────────────────────────────────────────────────
   // Test 5: Dublu-click "Deschide usa" — idempotent (T4 + D4)
   // ─────────────────────────────────────────────────────────────────────
-  test('dublu-click "Deschide usa" — idempotent (fara stare corupta) @campanie',
+  test('dubla-intrare usa pe harta — idempotent (fara stare corupta) @campanie',
     async ({ page }) => {
       const errors = trackErrors(page);
       const cfg = campaignCfg(3, 'classic');
@@ -765,25 +765,14 @@ test.describe('Campanie E2E @campanie', () => {
         await gp.locator('#btn-start').click();
 
         // Rezolva camera 0
+        await enterRoom(gp, 0);
         await solveRoom(gp, 'classic', 'r1');
 
-        // Asteapta coridorul
-        await gp.waitForFunction(
-          () => document.getElementById('corridor')?.classList.contains('show'),
-          null, { timeout: 10000 }
-        );
+        // Asteapta harta (target = camera 1)
+        await waitOverworld(gp);
 
-        // Primul click (normal) — butonul se dezactiveaza imediat
-        await gp.locator('#btn-next').click();
-
-        // Al doilea click fortat (butonul e disabled dupa primul click)
-        await gp.locator('#btn-next').click({ force: true });
-
-        // Asteapta inchiderea coridorului + mountRoom(1)
-        await gp.waitForFunction(
-          () => !document.getElementById('corridor')?.classList.contains('show'),
-          null, { timeout: 3000 }
-        );
+        // Dubla intrare pe usa 1 — a doua trebuie ignorata (idempotenta, T4/D4)
+        await gp.evaluate(() => { window.__ow.enterDoor(1); window.__ow.enterDoor(1); });
 
         // Camera 1 trebuie sa se monteze exact o singura data
         await gp.waitForFunction(
@@ -794,15 +783,13 @@ test.describe('Campanie E2E @campanie', () => {
         // Rezolva camera 1 si verifica starea finala
         await solveRoom(gp, 'classic', 'r2');
 
-        // Coridorul pentru camera 2 trebuie sa apara (nu sarit din cauza duplicate mount)
-        await gp.waitForFunction(
-          () => document.getElementById('corridor')?.classList.contains('show'),
-          null, { timeout: 10000 }
-        );
+        // Harta pentru camera 2 trebuie sa apara (nu sarit din cauza duplicate mount)
+        await waitOverworld(gp);
 
-        // "Camera 3" trebuie sa fie mentionata in corr-next (nu Camera 4 sau altceva)
-        const corrNext = await gp.locator('#corr-next').innerText();
-        expect(corrNext).toMatch(/[Uu]ltima|3/); // e ultima camera sau Camera 3
+        // Target = camera 3 (idx 2); exact 2 usi rezolvate (0+1, fara dubla-numarare)
+        const st = await gp.evaluate(() => window.__ow.state);
+        expect(st.target).toBe(2);
+        expect(st.doors.filter(d => d.solved).length).toBe(2);
 
       } finally {
         await gp.close();
@@ -835,6 +822,7 @@ test.describe('Campanie E2E @campanie', () => {
       try {
         await gp.goto('file://' + tmpPath);
         await gp.locator('#btn-start').click();
+        await enterRoom(gp, 0);
 
         // Asteapta roomReady
         await gp.waitForFunction(
@@ -877,8 +865,8 @@ test.describe('Campanie E2E @campanie', () => {
         await gp.locator('#btn-start').click();
 
         for (let i = 0; i < 8; i++) {
+          await enterRoom(gp, i);
           await solveRoom(gp, 'classic', 'r' + (i + 1));
-          if (i < 7) await openCorridor(gp);
         }
 
         // Finale trebuie sa apara
@@ -935,6 +923,18 @@ test.describe('Campanie E2E @campanie', () => {
         });
         expect(chromeHeight, 'chromeHeight null — #chrome nu exista').not.toBeNull();
         expect(chromeHeight, 'Chrome > 40px la 320px').toBeLessThanOrEqual(40);
+
+        // Si pe harta (overworld) — fara overflow orizontal la 320px
+        await gp.locator('#btn-start').click();
+        await gp.waitForFunction(
+          () => window.__ow && window.__ow.state.active,
+          null, { timeout: 5000 }
+        );
+        await gp.waitForTimeout(200);
+        const owOverflow = await gp.evaluate(
+          () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+        );
+        expect(owOverflow, 'Overflow orizontal pe harta la 320x568').toBe(false);
 
       } finally {
         await gp.close();

@@ -45,7 +45,10 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
       - [x] Pas 1 — Bomberman în `gameArcade` (GATA). Păstrează `openPuzzle`/`onDoorSolved`/`showFinal`/
         `modalOpen()`/`roomReady`; uși=N puzzle-uri, cufăr=scăpare. Demo regenerat. Smoke 21/21 +
         verificare gameplay 6/6 (`scratch/verify-arcade-integrated.mjs`) + captură.
-      - [ ] Pas 2 — Overworld în `gameCampaign`.
+      - [x] Pas 2 — Overworld în `gameCampaign` (GATA). Hartă top-down `#overworld` înlocuiește
+        coridorul; intro→`showOverworld(0)`, nextRoom/skip/resume→`showOverworld`. Contractul
+        (mountRoom/nextRoom/roomReady/roomError/timeout/finale) NESCHIMBAT. Cod coridor șters.
+        Cele 8 teste campanie rescrise (`enterRoom`/`waitOverworld`/`__ow`). Smoke 21/21 + captură.
       - [ ] Pas 3 — restyle 5 stiluri (din `STYLES.md`).
 - [!] **S4 — extinde `tests/smoke.mjs`** *(blocat de S3)* — bomberman, hartă, audio, regresie.
 
