@@ -35,26 +35,21 @@ Tipuri de puzzle: `free` (răspuns liber), `tf` (adevărat/fals), `choice` (vari
 
 ## Testing
 
-Harness Playwright în `tests/smoke.mjs`. Instalare o singură dată:
+Harness Playwright în `tests/smoke.mjs`. **Nu există `package.json` commitat** — produsul rămâne zero-dependențe. Instalare dev o singură dată:
 
 ```bash
-npm install              # instalează @playwright/test (devDependency)
-npx playwright install chromium
+npm i -D @playwright/test && npx playwright install chromium
 ```
 
-Rulare:
+Rulare (fără npm scripts — direct `npx`):
 
 ```bash
-npm run test:regresie    # regresie — exemplu-*.html rezolvate până la final + edge cases
-npm run test:campanie    # campanie E2E — rulează după ce integrator anunță gata
-npm test                 # suita completă (regresie + campanie)
-
-# sau direct:
-npx playwright test tests/smoke.mjs --grep "@regresie"
-npx playwright test tests/smoke.mjs
+npx playwright test tests/smoke.mjs --grep "@regresie"   # regresie: 13 teste
+npx playwright test tests/smoke.mjs --grep "@campanie"   # campanie E2E: 8 teste
+npx playwright test tests/smoke.mjs                      # suita completă: 21 teste
 ```
 
-**Baseline curent (pre-campanie):** 13/13 `@regresie` trec. Testele `@campanie` sunt marcate `skip` — se activează după implementarea `gameCampaign`.
+**Status curent:** 21/21 trec (13 `@regresie` + 8 `@campanie`).
 
 ## Atenție la editare
 
@@ -62,4 +57,4 @@ npx playwright test tests/smoke.mjs
 - O schimbare în `libJS`/`SNIP` afectează toate cele 5 motoare; verifică fiecare stil în preview.
 - `exemplu-*.html` sunt jocuri demo exportate din builder (câte unul per stil). Nu le edita manual — după modificări la motoare, regenerează-le prin exportul din builder.
 - `index.html` e doar pagina de landing care leagă builder-ul și demo-urile.
-- `package.json` + `node_modules/` sunt **doar dev tooling** (Playwright). Produsul (fișierele HTML) rămâne zero-dependențe — merge offline de pe `file://`.
+- `node_modules/` (gitignored) e doar dev tooling Playwright. Produsul (fișierele HTML) rămâne zero-dependențe — merge offline de pe `file://`.

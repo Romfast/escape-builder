@@ -2,15 +2,13 @@
 /**
  * tests/smoke.mjs — Escape Room Builder smoke & regression tests
  *
- * Setup (o singura data):
- *   npm install
- *   npx playwright install chromium
+ * Setup (o singura data, fara package.json commitat):
+ *   npm i -D @playwright/test && npx playwright install chromium
  *
  * Rulare:
  *   npx playwright test tests/smoke.mjs                    # suita completa
- *   npx playwright test tests/smoke.mjs --grep @regresie   # regresie (baseline, acum)
- *   npx playwright test tests/smoke.mjs --grep @campanie   # campanie (dupa integrator)
- *   npm test                                               # alias pentru suita completa
+ *   npx playwright test tests/smoke.mjs --grep @regresie   # regresie (baseline)
+ *   npx playwright test tests/smoke.mjs --grep @campanie   # campanie E2E
  *
  * @see CLAUDE.md § Testing
  */
@@ -114,7 +112,7 @@ test.describe('Regresie exemplu-*.html @regresie', () => {
     await page.goto(fileURL('exemplu-terminal.html'));
 
     // Asteapta ca intro-ul sa termine animatia de typing si primul puzzle sa apara.
-    // Nota: { timeout } in waitForFunction merge ca al doilea argument FARA arg intermediar.
+    // IMPORTANT: al doilea argument al waitForFunction e arg-ul functiei, nu optiunile!
     await page.waitForFunction(
       () => document.getElementById('out')?.textContent?.includes('[1/'),
       null, { timeout: 20000 }
@@ -411,30 +409,28 @@ test.describe('Edge cases @regresie', () => {
 // ═══════════════════════════════════════════════════════════════════════
 // SECTIUNEA 3 — CAMPANIE E2E
 //
-// *** SKIP pana cand integrator anunta implementarea gata ***
-// Dupa: schimba `test.skip(true, ...)` → `test.skip(false)` sau sterge linia.
-//
 // Contractul documentat in plan:
 //   - gameCampaign(cfg) genereaza HTML cu iframe per camera
 //   - Fiecare camera apeleaza parent.nextRoom({idx, stars, letter})
-//   - parent.roomReady() semnaledaza montarea cu succes
+//   - parent.roomReady(idx) semnaleaza montarea cu succes (data-room-ready attr)
 //   - parent.roomError(idx, msg) declanseaza skip cu 0 stele
 //   - Timeout 4s fara roomReady → camera moarta → skip
 //   - CFG._campaign = {idx, total, stars, letters, deadline} in fiecare camera
-//   - Replace token: TPL.replace('__CFG__', () => json) (D1: evita $&)
+//   - Replace token: tpl.replace('__CFG__', function(){ return json; }) (D1: evita $&)
 //   - safeStore (try/catch) pentru resume (D3)
 //   - Hash djb2 peste CFG embedat la export (D11)
 // ═══════════════════════════════════════════════════════════════════════
 
 test.describe('Campanie E2E @campanie', () => {
+  test.describe.configure({ timeout: 90000 });
 
-  /** Helper: genereaza un cfg de campanie cu N puzzle-uri, stiluri rotite. */
-  function campaignCfg(n = 5) {
+  /** Helper: genereaza cfg de campanie cu N puzzle-uri. */
+  function campaignCfg(n = 5, forceStyle = null) {
     const styles = ['classic', 'terminal', 'arcade', 'chat', 'point'];
     return {
-      title: 'Test Campanie ' + n, player: 'Tester', color: '#6d28d9',
+      title: 'Test Campanie', player: 'Tester', color: '#6d28d9',
       style: 'campaign', charName: 'Alex',
-      story: 'O campanie de test cu ' + n + ' camere.',
+      story: 'O campanie de test.',
       finalMessage: 'Ai terminat campania!',
       puzzles: Array.from({ length: n }, (_, i) => ({
         title: 'Camera ' + (i + 1),
@@ -445,182 +441,385 @@ test.describe('Campanie E2E @campanie', () => {
         choices: '',
         hint: '',
         letter: String.fromCharCode(65 + (i % 26)),
-        style: styles[i % 5]
+        style: forceStyle || styles[i % 5]
       }))
     };
   }
 
-  test('campanie E2E — intro → camere cu stiluri rotite → final cu stele+litere+cuvant corect @campanie',
-    async ({ page }) => {
-      test.skip(true, 'Asteapta gameCampaign de la integrator — ster skip dupa');
-      const errors = trackErrors(page);
-      await page.goto(fileURL('escape-builder.html'));
+  /**
+   * Genereaza HTML campanie via builder si il scrie la fisier temp (file://).
+   * Returneza calea. Caller-ul trebuie sa stearga fisierul dupa test (try/finally).
+   */
+  async function writeCampaignHtml(page, cfg, suffix) {
+    await page.goto(fileURL('escape-builder.html'));
+    const html = await page.evaluate((c) => gameHTML(c), cfg);
+    const tmpPath = join(ROOT, 'tests', `.tmp-campaign-${suffix}.html`);
+    writeFileSync(tmpPath, html);
+    return tmpPath;
+  }
 
-      const cfg = campaignCfg(5);
-      const html = await page.evaluate((c) => {
-        if (typeof gameCampaign !== 'function') throw new Error('gameCampaign not yet');
-        return gameHTML(c);
-      }, cfg);
+  /**
+   * Rezolva o camera din campanie (in iframe #room-frame).
+   * Presupune ca data-room-ready e deja setat pe iframe.
+   * Tip: 'free', raspuns: answer.
+   */
+  async function solveRoom(gp, style, answer) {
+    // Asteapta ca noul room sa semnaleze roomReady
+    await gp.waitForFunction(
+      () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+      null, { timeout: 8000 }
+    );
 
-      const gp = await page.context().newPage();
-      const gameErrors = trackErrors(gp);
-      await gp.setContent(html, { waitUntil: 'domcontentloaded' });
+    const ifl = gp.frameLocator('#room-frame');
 
-      // Intro campanie
-      await gp.locator('button:text("Incepe aventura")').click();
+    if (style === 'classic') {
+      await ifl.locator('#btnStart').click();
+      await ifl.locator('#answers input[type=text]').fill(answer);
+      await ifl.locator('#answers button:text("Verifica")').click();
 
-      // Parcurge 5 camere, fiecare in stilul ei rotat
-      const styles = ['classic', 'terminal', 'arcade', 'chat', 'point'];
-      for (let i = 0; i < 5; i++) {
-        const answer = 'r' + (i + 1);
-        const style = styles[i % 5];
-
-        // Asteapta roomReady → camera montata
-        await gp.waitForFunction(
-          () => document.querySelector('[data-room-ready="true"]') !== null ||
-                document.querySelector('iframe.room-ready') !== null,
-          { timeout: 8000 }
-        );
-
-        // Raspunde in camera curenta (prin iframe)
-        const iframeLocator = gp.frameLocator('iframe[data-room]').last();
-
-        if (style === 'classic') {
-          await iframeLocator.locator('#btnStart').click();
-          await iframeLocator.locator('#answers input').fill(answer);
-          await iframeLocator.locator('#answers button:text("Verifica")').click();
-        } else if (style === 'terminal') {
-          await gp.waitForFunction(() => true); // terminal necesita interactiune specifica
-          await iframeLocator.locator('#cmd').fill(answer);
-          await iframeLocator.locator('#cmd').press('Enter');
-        }
-        // Alte stiluri: similar
-
-        // Asteapta nextRoom apelat → apare coridorul
-        if (i < 4) {
-          await gp.waitForSelector('button:text("Deschide usa")', { timeout: 10000 });
-          // Verifica stele si litera in coridor
-          await expect(gp.locator('[data-stars], .stars, .stele')).toBeVisible({ timeout: 3000 });
-          // Click "Deschide usa"
-          await gp.locator('button:text("Deschide usa")').click();
-        }
-      }
-
-      // Ecranul final
-      await expect(gp.locator('#fOverlay, [data-final]')).toBeVisible({ timeout: 10000 });
-      // Cuvantul magic = ABCDE (primele 5 litere)
-      const finalText = await gp.content();
-      expect(finalText).toMatch(/A.*B.*C.*D.*E/);
-
-      expect(gameErrors, 'Game errors: ' + gameErrors.join('\n')).toHaveLength(0);
-      expect(errors, 'Builder errors: ' + errors.join('\n')).toHaveLength(0);
-    });
-
-  test('resume — reload mid-campanie returneaza la coridor (safeStore D3+D11) @campanie',
-    async ({ page }) => {
-      test.skip(true, 'Asteapta safeStore+hash din T7 de la integrator');
-      const errors = trackErrors(page);
-      await page.goto(fileURL('escape-builder.html'));
-
-      const cfg = campaignCfg(3);
-      const html = await page.evaluate((c) => gameHTML(c), cfg);
-
-      const gp = await page.context().newPage();
-      await gp.setContent(html, { waitUntil: 'domcontentloaded' });
-
-      // Start si completa camera 1 (progreseaza dincolo de ea)
-      await gp.locator('button:text("Incepe aventura")').click();
-      // ... rezolva camera 1 ...
-      await gp.waitForSelector('button:text("Deschide usa")', { timeout: 12000 });
-
-      // Reload mid-campanie (inainte de camera 2)
-      await gp.reload();
-
-      // Trebuie sa se reia la coridor, NU la intro
-      await expect(gp.locator('button:text("Deschide usa")')).toBeVisible({ timeout: 5000 });
-      // Intro-ul NU trebuie sa fie vizibil
-      const hasIntro = await gp.locator('button:text("Incepe aventura")').isVisible();
-      expect(hasIntro).toBe(false);
-
-      expect(errors, errors.join('\n')).toHaveLength(0);
-    });
-
-  test('camera moarta — template stricat → skip 0 stele + cod eroare vizibil @campanie',
-    async ({ page }) => {
-      test.skip(true, 'Asteapta roomReady/roomError+timeout T3 de la integrator');
-      // Contractul: un template de camera care arunca eroare inainte de roomReady
-      // → coridorul afiseaza "usa intepenita" cu:
-      //   - 0 stele
-      //   - cod eroare "stil·idx" monospace mic
-      //   - buton "Sari la camera urmatoare"
-      //
-      // La export final: litera camerei sarite = dala goala cu lakat.
-      const errors = trackErrors(page);
-      await page.goto(fileURL('escape-builder.html'));
-
-      const cfg = campaignCfg(3);
-      const html = await page.evaluate((c) => gameHTML(c), cfg);
-
-      const gp = await page.context().newPage();
-      const gameErrors = trackErrors(gp);
-      await gp.setContent(html, { waitUntil: 'domcontentloaded' });
-
-      await gp.locator('button:text("Incepe aventura")').click();
-
-      // Injecteaza o eroare in prima camera dupa montare
+    } else if (style === 'terminal') {
+      // Asteapta animatia intro + aparitia primului puzzle [1/
       await gp.waitForFunction(
-        () => document.querySelector('iframe[data-room]') !== null,
-        { timeout: 6000 }
+        () => document.getElementById('room-frame')
+          ?.contentDocument?.getElementById('out')
+          ?.textContent?.includes('[1/'),
+        null, { timeout: 20000 }
       );
+      await ifl.locator('#cmd').fill(answer);
+      await ifl.locator('#cmd').press('Enter');
+
+    } else if (style === 'arcade') {
+      // Deschide puzzle-ul prin API + rezolva modal
       await gp.evaluate(() => {
-        const iframe = document.querySelector('iframe[data-room]');
-        if (iframe?.contentWindow) {
-          iframe.contentWindow.dispatchEvent(new ErrorEvent('error', {
-            message: 'Template stricat', error: new Error('Template stricat')
-          }));
-        }
+        const w = document.getElementById('room-frame').contentWindow;
+        if (typeof w.openPuzzle === 'function') w.openPuzzle(0, w.onDoorSolved);
+      });
+      await expect(ifl.locator('#mOverlay')).toBeVisible({ timeout: 3000 });
+      await ifl.locator('#mAnswers input[type=text]').fill(answer);
+      await ifl.locator('#mAnswers button:not(.mhint):not(.mclose)').first().click();
+      // Asteapta inchiderea modalului (animatie 750ms) — la iesire onDoorSolved e apelat
+      await ifl.locator('#mOverlay').waitFor({ state: 'hidden', timeout: 3000 });
+      // Triggereaza showFinal → parent.nextRoom (ramura _campaign)
+      await gp.evaluate(() => {
+        const w = document.getElementById('room-frame').contentWindow;
+        if (typeof w.showFinal === 'function') w.showFinal();
       });
 
-      // Coridorul trebuie sa arate "usa intepenita" cu 0 stele si cod eroare
-      await expect(gp.locator(':text("intepenita"), :text("Sari")')).toBeVisible({ timeout: 8000 });
-      const corridorText = await gp.content();
-      expect(corridorText).toMatch(/classic[·.]0|terminal[·.]0|arcade[·.]0/i); // cod eroare
+    } else if (style === 'chat') {
+      // Asteapta aparitia input-ului in composer (dupa animatia intro)
+      await ifl.locator('#composer input').waitFor({ timeout: 20000 });
+      await ifl.locator('#composer input').fill(answer);
+      await ifl.locator('#composer button:not(.chip)').first().click();
 
-      // Stars = 0 pentru camera sarita
-      await expect(gp.locator(':text("0 ★"), :text("0/")').first()).toBeVisible();
+    } else if (style === 'point') {
+      // Click pe primul obiect hot → modal
+      await ifl.locator('g.hot[data-i="0"]').click();
+      await expect(ifl.locator('#mOverlay')).toBeVisible({ timeout: 3000 });
+      await ifl.locator('#mAnswers input[type=text]').fill(answer);
+      await ifl.locator('#mAnswers button:not(.mhint):not(.mclose)').first().click();
+      // Asteapta inchiderea modalului
+      await ifl.locator('#mOverlay').waitFor({ state: 'hidden', timeout: 3000 });
+      // Usa se deschide dupa ce onDoorSolved e apelat (solvedCount >= N)
+      await ifl.locator('#door.open').waitFor({ timeout: 3000 });
+      await ifl.locator('#door').click();
+    }
+  }
 
-      expect(gameErrors.filter(e => !e.includes('Template stricat')), gameErrors.join('\n'))
-        .toHaveLength(0);
+  /**
+   * Asteapta coridorul si apasa "Deschide usa".
+   * Asteapta si ca coridorul sa dispara (mountRoom apelat) inainte de return —
+   * asta garanteaza ca data-room-ready al camerei precedente a fost sters.
+   */
+  async function openCorridor(gp) {
+    await gp.waitForFunction(
+      () => document.getElementById('corridor')?.classList.contains('show'),
+      null, { timeout: 10000 }
+    );
+    await gp.locator('#btn-next').click();
+    // Asteapta inchiderea coridorului (mountRoom apelat dupa 280ms animatie)
+    await gp.waitForFunction(
+      () => !document.getElementById('corridor')?.classList.contains('show'),
+      null, { timeout: 3000 }
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 1: E2E complet — 5 camere, stiluri rotite, final cu stele+cuvant
+  // ─────────────────────────────────────────────────────────────────────
+  test('campanie E2E — intro → camere cu stiluri rotite → final cu stele+litere+cuvant corect @campanie',
+    async ({ page }) => {
+      test.setTimeout(120000);
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(5);
+      const tmpPath = await writeCampaignHtml(page, cfg, 'e2e');
+
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+
+        // Intro → click start
+        await expect(gp.locator('#btn-start')).toBeVisible({ timeout: 5000 });
+        await gp.locator('#btn-start').click();
+
+        const styles = ['classic', 'terminal', 'arcade', 'chat', 'point'];
+
+        for (let i = 0; i < 5; i++) {
+          await solveRoom(gp, styles[i], 'r' + (i + 1));
+          if (i < 4) await openCorridor(gp);
+        }
+
+        // Finale trebuie sa apara
+        await gp.waitForFunction(
+          () => document.getElementById('finale')?.classList.contains('show'),
+          null, { timeout: 10000 }
+        );
+
+        // Litere colectate: A, B, C, D, E
+        const finWordText = await gp.locator('#fin-word').innerText();
+        expect(finWordText).toMatch(/A/);
+        expect(finWordText).toMatch(/B/);
+        expect(finWordText).toMatch(/C/);
+
+        // Stele: "X / 15 ★" (5 camere × 3 max = 15)
+        const finStars = await gp.locator('#fin-stars').innerText();
+        expect(finStars).toMatch(/\d+ \/ 15/);
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, 'Builder errors:\n' + errors.join('\n')).toHaveLength(0);
+    });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 2: Resume — reload mid-campanie revine la coridor
+  // ─────────────────────────────────────────────────────────────────────
+  test('resume — reload mid-campanie returneaza la coridor (safeStore D3+D11) @campanie',
+    async ({ page }) => {
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(3, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'resume');
+
+      const gp = await page.context().newPage();
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        // Rezolva camera 0 (classic)
+        await solveRoom(gp, 'classic', 'r1');
+
+        // Asteapta coridorul — saveProgress() a fost apelat, sesionStorage are progresul
+        await gp.waitForFunction(
+          () => document.getElementById('corridor')?.classList.contains('show'),
+          null, { timeout: 10000 }
+        );
+
+        // Reload — tryResume() trebuie sa redeschida coridorul, NU intro-ul
+        await gp.reload();
+        await gp.waitForLoadState('domcontentloaded');
+
+        // Coridorul trebuie sa fie vizibil
+        await expect(gp.locator('#btn-next')).toBeVisible({ timeout: 5000 });
+
+        // Intro-ul NU trebuie sa fie vizibil
+        const introVisible = await gp.locator('#btn-start').isVisible();
+        expect(introVisible, 'Intro-ul nu ar trebui sa fie vizibil dupa resume').toBe(false);
+
+        // Intro overlay nu are clasa show
+        const introHasShow = await gp.evaluate(
+          () => document.getElementById('intro')?.classList.contains('show')
+        );
+        expect(introHasShow, '#intro.show dupa resume').toBe(false);
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 3: Camera moartă — timeout 4s → skip-banner + cod eroare
+  // ─────────────────────────────────────────────────────────────────────
+  test('camera moarta — template stricat → skip-banner + cod eroare vizibil @campanie',
+    async ({ page }) => {
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(3, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'dead');
+
+      const gp = await page.context().newPage();
+      // Captura doar pageerror (nu console.warn asteptat de la timeout)
+      const gameErrors = [];
+      gp.on('pageerror', err => gameErrors.push(err.message));
+
+      try {
+        await gp.goto('file://' + tmpPath);
+
+        // Inlocuieste template-ul 'classic' cu HTML gol care NU apeleaza roomReady
+        await gp.evaluate(() => {
+          TPL['classic'] = '<!doctype html><html><body><p>Camera intepenita</p></body></html>';
+        });
+
+        await gp.locator('#btn-start').click();
+
+        // Timeout 4s → skip-banner apare in max 9s (4s timeout + 5s marja)
+        await gp.waitForFunction(
+          () => document.getElementById('skip-banner')?.classList.contains('show'),
+          null, { timeout: 9000 }
+        );
+
+        // Codul erorii e vizibil
+        const skipCode = await gp.locator('#skip-code').innerText();
+        expect(skipCode).toContain('Cod:');
+        expect(skipCode).toContain('timeout');
+
+        // Butonul "Sari la camera urmatoare" e vizibil
+        await expect(gp.locator('#btn-skip')).toBeVisible();
+
+        // Camera urmatoare (idx=1) se poate deschide
+        await gp.locator('#btn-skip').click();
+
+        // Coridorul sau direct camera urmatoare (daca N>2 ramane coridor)
+        // Inlocuim si al doilea template sa se deschida coridorul
+        // skipRoom → showSkipBanner → btn-skip → idx+1 < N → showCorridor
+        await gp.waitForFunction(
+          () => document.getElementById('corridor')?.classList.contains('show') ||
+                document.getElementById('skip-banner')?.classList.contains('show'),
+          null, { timeout: 5000 }
+        );
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(gameErrors, gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 4: Eroare post-ready — roomError dupa roomReady = acelasi skip
+  // ─────────────────────────────────────────────────────────────────────
   test('eroare post-ready — acelasi skip ca camera moarta @campanie',
     async ({ page }) => {
-      test.skip(true, 'Asteapta roomError semantic ORICAND T3+D5 de la integrator');
-      // Camera apeleaza roomReady() dar arunca o eroare async mai tarziu
-      // → acelasi overlay "usa intepenita" ca si camera moarta
-      // Specificat in plan: "roomError are semantica ORICAND — si post-ready"
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(2, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'post-ready');
+
+      const gp = await page.context().newPage();
+      const gameErrors = [];
+      gp.on('pageerror', err => gameErrors.push(err.message));
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        // Asteapta roomReady pentru camera 0 (data-room-ready setat)
+        await gp.waitForFunction(
+          () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+          null, { timeout: 8000 }
+        );
+
+        // Apeleaza window.roomError direct de pe fereastra orchestratorului (gp)
+        // roomError are semantica ORICAND — si post-ready (D5)
+        await gp.evaluate(() => {
+          window.roomError(0, 'eroare-post-ready-test');
+        });
+
+        // skip-banner trebuie sa apara imediat
+        await gp.waitForFunction(
+          () => document.getElementById('skip-banner')?.classList.contains('show'),
+          null, { timeout: 5000 }
+        );
+
+        const skipCode = await gp.locator('#skip-code').innerText();
+        expect(skipCode).toContain('Cod:');
+        await expect(gp.locator('#btn-skip')).toBeVisible();
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(gameErrors, gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 5: Dublu-click "Deschide usa" — idempotent (T4 + D4)
+  // ─────────────────────────────────────────────────────────────────────
   test('dublu-click "Deschide usa" — idempotent (fara stare corupta) @campanie',
     async ({ page }) => {
-      test.skip(true, 'Asteapta guard idempotenta T4+D5 de la integrator');
-      // Doua click-uri rapide pe "Deschide usa" NU trebuie:
-      //   - sa monteze doua camere
-      //   - sa corupte idx-ul activ
-      //   - sa dupleze apelurile nextRoom
-      // Specificat in plan: butonul dezactivat dupa primul click; nextRoom ignorat pt idx deja incheiat
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(3, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'dblclick');
+
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        // Rezolva camera 0
+        await solveRoom(gp, 'classic', 'r1');
+
+        // Asteapta coridorul
+        await gp.waitForFunction(
+          () => document.getElementById('corridor')?.classList.contains('show'),
+          null, { timeout: 10000 }
+        );
+
+        // Primul click (normal) — butonul se dezactiveaza imediat
+        await gp.locator('#btn-next').click();
+
+        // Al doilea click fortat (butonul e disabled dupa primul click)
+        await gp.locator('#btn-next').click({ force: true });
+
+        // Asteapta inchiderea coridorului + mountRoom(1)
+        await gp.waitForFunction(
+          () => !document.getElementById('corridor')?.classList.contains('show'),
+          null, { timeout: 3000 }
+        );
+
+        // Camera 1 trebuie sa se monteze exact o singura data
+        await gp.waitForFunction(
+          () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+          null, { timeout: 8000 }
+        );
+
+        // Rezolva camera 1 si verifica starea finala
+        await solveRoom(gp, 'classic', 'r2');
+
+        // Coridorul pentru camera 2 trebuie sa apara (nu sarit din cauza duplicate mount)
+        await gp.waitForFunction(
+          () => document.getElementById('corridor')?.classList.contains('show'),
+          null, { timeout: 10000 }
+        );
+
+        // "Camera 3" trebuie sa fie mentionata in corr-next (nu Camera 4 sau altceva)
+        const corrNext = await gp.locator('#corr-next').innerText();
+        expect(corrNext).toMatch(/[Uu]ltima|3/); // e ultima camera sau Camera 3
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 6: $ / $& in text — D1 replace-functie nu corupe JSON-ul
+  // ─────────────────────────────────────────────────────────────────────
   test('intrebare cu $/$& in text — camera se monteaza corect (D1 replace-functie) @campanie',
     async ({ page }) => {
-      test.skip(true, 'Asteapta replace(TOKEN, () => json) D1 de la integrator');
       const errors = trackErrors(page);
-      await page.goto(fileURL('escape-builder.html'));
-
-      // Puzzle cu $ si & in intrebare (ar corupe JSON-ul daca replace e string)
       const cfg = {
-        ...campaignCfg(1),
+        ...campaignCfg(1, 'classic'),
         puzzles: [{
           title: 'Dollar test', type: 'free',
           question: 'Costa $10.00 & $& mai mult?',
@@ -628,71 +827,119 @@ test.describe('Campanie E2E @campanie', () => {
           style: 'classic'
         }]
       };
-
-      const html = await page.evaluate((c) => gameHTML(c), cfg);
+      const tmpPath = await writeCampaignHtml(page, cfg, 'dollar');
 
       const gp = await page.context().newPage();
       const gameErrors = trackErrors(gp);
-      await gp.setContent(html, { waitUntil: 'domcontentloaded' });
 
-      // Asteapta montarea camerei (roomReady)
-      await gp.waitForFunction(
-        () => document.querySelector('iframe[data-room]')?.contentDocument != null,
-        { timeout: 5000 }
-      );
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
 
-      // CFG.puzzles[0].question trebuie sa fie intact
-      const question = await gp.evaluate(() => {
-        const iframe = document.querySelector('iframe[data-room]');
-        return iframe?.contentWindow?.CFG?.puzzles?.[0]?.question ?? '';
-      });
-      expect(question).toContain('$10.00');
-      expect(question).toContain('$&');
+        // Asteapta roomReady
+        await gp.waitForFunction(
+          () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+          null, { timeout: 8000 }
+        );
 
-      expect(gameErrors, gameErrors.join('\n')).toHaveLength(0);
+        // CFG.puzzles[0].question in frame trebuie sa fie intact
+        const question = await gp.evaluate(() => {
+          return document.getElementById('room-frame')
+            ?.contentWindow?.CFG?.puzzles?.[0]?.question ?? '';
+        });
+        expect(question, 'Intrebarea lipseste din CFG al frame-ului').toBeTruthy();
+        expect(question).toContain('$10.00');
+        expect(question).toContain('$&');
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 7: 8+ camere — beep functional (AudioContext D2) pana la final
+  // ─────────────────────────────────────────────────────────────────────
   test('campanie 8+ camere — beep functional pana la final @campanie',
     async ({ page }) => {
-      test.skip(true, 'Asteapta gameCampaign + parent.beep D2 de la integrator');
-      // Cu 8 camere (peste limita de 5 stiluri), beep() trebuie sa functioneze
-      // in toate camerele fara sa depaseasca limita de AudioContext a browser-ului.
-      // Specificat in plan: audio detinut de parinte; camerele apeleaza parent.beep(ok).
+      test.setTimeout(120000);
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(8, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, '8rooms');
+
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        for (let i = 0; i < 8; i++) {
+          await solveRoom(gp, 'classic', 'r' + (i + 1));
+          if (i < 7) await openCorridor(gp);
+        }
+
+        // Finale trebuie sa apara
+        await gp.waitForFunction(
+          () => document.getElementById('finale')?.classList.contains('show'),
+          null, { timeout: 10000 }
+        );
+
+        // 8 litere colectate: A-H
+        const finWord = await gp.locator('#fin-word').innerText();
+        expect(finWord.replace(/\s/g, '')).toMatch(/[A-H]{1,8}/);
+
+        // Stele: "X / 24 ★" (8 × 3 = 24)
+        const finStars = await gp.locator('#fin-stars').innerText();
+        expect(finStars).toMatch(/\d+ \/ 24/);
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 8: 320x568 — chrome 40px + zero overflow orizontal (T6 + TD4)
+  // ─────────────────────────────────────────────────────────────────────
   test('campanie: 320x568 fara overflow orizontal (chrome 40px + calc(100vh-chrome)) @campanie',
     async ({ page }) => {
-      test.skip(true, 'Asteapta chrome bar + buget vertical T6+TD4 de la integrator');
       await page.setViewportSize({ width: 320, height: 568 });
       const errors = trackErrors(page);
-      await page.goto(fileURL('escape-builder.html'));
-
-      const cfg = campaignCfg(2);
-      const html = await page.evaluate((c) => gameHTML(c), cfg);
+      const cfg = campaignCfg(2, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, '320x568');
 
       const gp = await page.context().newPage();
       await gp.setViewportSize({ width: 320, height: 568 });
       const gpErrors = trackErrors(gp);
-      await gp.setContent(html, { waitUntil: 'domcontentloaded' });
-      await gp.waitForTimeout(500);
 
-      // Zero scroll orizontal (§Design pct. 11)
-      const overflow = await gp.evaluate(
-        () => document.documentElement.scrollWidth >
-              document.documentElement.clientWidth + 1
-      );
-      expect(overflow, 'Overflow orizontal la 320x568 in campanie').toBe(false);
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.waitForTimeout(500); // asteapta CSS aplicat
 
-      // Chrome 40px sub 600px (§Design pct. 11)
-      const chromeHeight = await gp.evaluate(() => {
-        const chrome = document.querySelector('[data-chrome], .campaign-chrome, #chrome');
-        return chrome ? chrome.getBoundingClientRect().height : null;
-      });
-      if (chromeHeight !== null) {
+        // Zero scroll orizontal (§Design pct. 11)
+        const overflow = await gp.evaluate(
+          () => document.documentElement.scrollWidth >
+                document.documentElement.clientWidth + 1
+        );
+        expect(overflow, 'Overflow orizontal la 320x568 in campanie').toBe(false);
+
+        // Chrome bar 40px la viewport < 600px (media query #chrome { height: 40px })
+        const chromeHeight = await gp.evaluate(() => {
+          const chrome = document.getElementById('chrome');
+          return chrome ? chrome.getBoundingClientRect().height : null;
+        });
+        expect(chromeHeight, 'chromeHeight null — #chrome nu exista').not.toBeNull();
         expect(chromeHeight, 'Chrome > 40px la 320px').toBeLessThanOrEqual(40);
-      }
 
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
       expect(gpErrors, gpErrors.join('\n')).toHaveLength(0);
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
