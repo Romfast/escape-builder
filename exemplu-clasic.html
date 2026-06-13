@@ -96,7 +96,7 @@
 </div>
 
 <script>
-var CFG = {"title":"Comoara ascunsa","player":"","color":"#6d28d9","story":"O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari. Rezolva fiecare puzzle ca sa aduni literele cuvantului magic.","finalMessage":"Felicitari! Ai gasit comoara!","puzzles":[{"title":"Incalzirea","type":"free","question":"Cat fac 7 x 8?","answer":"56","tfAnswer":"Adevarat","choices":"","hint":"Tabla inmultirii cu 7.","letter":"D"},{"title":"Adevarat sau fals","type":"tf","question":"Romania are iesire la Marea Neagra.","answer":"","tfAnswer":"Adevarat","choices":"","hint":"","letter":"A"},{"title":"Alege raspunsul","type":"choice","question":"Care este capitala Frantei?","answer":"","tfAnswer":"Adevarat","choices":"*Paris\nLyon\nMarsilia","hint":"Turnul Eiffel.","letter":"R"}]};
+var CFG = {"title":"Comoara ascunsa","player":"","color":"#6d28d9","charName":"Alex","story":"O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari.","finalMessage":"Felicitari! Ai gasit comoara!","puzzles":[{"title":"Incalzirea","type":"free","question":"Cat fac 7 x 8?","answer":"56","tfAnswer":"Adevarat","choices":"","hint":"Tabla inmultirii cu 7.","letter":"D","style":""},{"title":"Adevarat sau fals","type":"tf","question":"Romania are iesire la Marea Neagra.","answer":"","tfAnswer":"Adevarat","choices":"","hint":"","letter":"A","style":""},{"title":"Alege raspunsul","type":"choice","question":"Care este capitala Frantei?","answer":"","tfAnswer":"Adevarat","choices":"*Paris\nLyon\nMarsilia","hint":"Turnul Eiffel.","letter":"R","style":""}],"style":"classic"};
 document.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');
 document.documentElement.style.setProperty('--accent-light', 'color-mix(in srgb, ' + (CFG.color || '#6d28d9') + ' 40%, white)');
 
@@ -216,6 +216,11 @@ function check(given, expected) {
 function next() {
   idx++;
   if (idx < CFG.puzzles.length) { renderPuzzle(); return; }
+  if(CFG._campaign){
+    var L = ''; for(var ci=0;ci<CFG.puzzles.length;ci++){var lc=(CFG.puzzles[ci].letter||'').trim();if(lc)L+=lc.toUpperCase();}
+    try{ parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:L.charAt(0)}); }catch(e){}
+    return;
+  }
   show('sFinal');
   var max = CFG.puzzles.length * 3;
   el('finalStars').textContent = totalStars + ' / ' + max + ' \u2605';
@@ -251,6 +256,7 @@ function confetti() {
 }
 
 function beep(ok) {
+  if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; }
   try {
     var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
     var t = ctx.currentTime;
@@ -265,6 +271,8 @@ function beep(ok) {
     });
   } catch (e) {}
 }
+window.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };
+if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} }
 </script>
 </body>
 </html>

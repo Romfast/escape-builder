@@ -25,7 +25,7 @@
 <div id="inline"><span>&gt;</span><input id="cmd" autocomplete="off" autofocus spellcheck="false"></div>
 </div>
 <script>
-var CFG = {"title":"Comoara ascunsa","player":"","color":"#6d28d9","style":"terminal","charName":"Alex","story":"O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari. Rezolva fiecare puzzle ca sa aduni literele cuvantului magic.","finalMessage":"Felicitari! Ai gasit comoara!","puzzles":[{"title":"Incalzirea","type":"free","question":"Cat fac 7 x 8?","answer":"56","tfAnswer":"Adevarat","choices":"","hint":"Tabla inmultirii cu 7.","letter":"D"},{"title":"Adevarat sau fals","type":"tf","question":"Romania are iesire la Marea Neagra.","answer":"","tfAnswer":"Adevarat","choices":"","hint":"","letter":"A"},{"title":"Alege raspunsul","type":"choice","question":"Care este capitala Frantei?","answer":"","tfAnswer":"Adevarat","choices":"*Paris\nLyon\nMarsilia","hint":"Turnul Eiffel.","letter":"R"}]};
+var CFG = {"title":"Comoara ascunsa","player":"","color":"#6d28d9","charName":"Alex","story":"O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari.","finalMessage":"Felicitari! Ai gasit comoara!","puzzles":[{"title":"Incalzirea","type":"free","question":"Cat fac 7 x 8?","answer":"56","tfAnswer":"Adevarat","choices":"","hint":"Tabla inmultirii cu 7.","letter":"D","style":""},{"title":"Adevarat sau fals","type":"tf","question":"Romania are iesire la Marea Neagra.","answer":"","tfAnswer":"Adevarat","choices":"","hint":"","letter":"A","style":""},{"title":"Alege raspunsul","type":"choice","question":"Care este capitala Frantei?","answer":"","tfAnswer":"Adevarat","choices":"*Paris\nLyon\nMarsilia","hint":"Turnul Eiffel.","letter":"R","style":""}],"style":"terminal"};
 document.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');
 var totalStars = 0;
 function el(id){ return document.getElementById(id); }
@@ -35,8 +35,16 @@ function finalWord(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ 
 function choiceOpts(p){ return (p.choices || '').split('\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }
 function choiceCorrect(p){ var ls = (p.choices || '').split('\n'); for (var i = 0; i < ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }
 function checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); return norm(given) !== '' && norm(given) === norm(exp); }
-function beep(ok){ try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }
+function beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }
 function confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i < 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }
+function roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }
+window.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };
+if(CFG._campaign){
+  /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */
+  var _cs = document.createElement('style');
+  _cs.textContent = 'h1{display:none!important}.progress{display:none!important}.meta{display:none!important}';
+  (document.head || document.documentElement).appendChild(_cs);
+}
 var idx = -1, attempts = 0, hintUsed = false, done = false;
 var solved = [];
 var out = el('out'), cmd = el('cmd');
@@ -68,7 +76,10 @@ function echo(text, cls){ var d = document.createElement('div'); d.className = '
 function collected(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += solved[i] ? L.toUpperCase() + ' ' : '_ '; } return w.trim() || '(niciuna)'; }
 
 var bar = '==============================================';
-say([bar, '  ' + CFG.title.toUpperCase(), bar, ' ', (CFG.player ? CFG.player + ', ' : '') + CFG.story, ' ', 'Comenzi: INDICIU, LITERE, AJUTOR. In rest, scrie raspunsul si apasa Enter.'], '', nextPuzzle);
+var introLines = CFG._campaign
+  ? [bar, '  ' + CFG.title.toUpperCase(), bar, 'Comenzi: INDICIU, AJUTOR. Scrie raspunsul si apasa Enter.']
+  : [bar, '  ' + CFG.title.toUpperCase(), bar, ' ', (CFG.player ? CFG.player + ', ' : '') + CFG.story, ' ', 'Comenzi: INDICIU, LITERE, AJUTOR. In rest, scrie raspunsul si apasa Enter.'];
+say(introLines, '', nextPuzzle);
 
 function nextPuzzle(){
   idx++; attempts = 0; hintUsed = false;
@@ -82,6 +93,13 @@ function nextPuzzle(){
 
 function finale(){
   done = true;
+  if(CFG._campaign){
+    var s = totalStars; var L = finalWord().charAt(0);
+    say(['>> CAMERA REZOLVATA! Stele: ' + s + (L ? ' | Litera: ' + L : '')], 'ok', function(){
+      try{ parent.nextRoom({idx:CFG._campaign.idx, stars:s, letter:L}); }catch(e){}
+    });
+    return;
+  }
   var w = finalWord().split('').join(' ');
   var lines = [' ', bar, '   E V A D A R E   R E U S I T A', bar, 'Stele: ' + totalStars + ' / ' + (CFG.puzzles.length * 3)];
   if (w) lines.push('Cuvantul magic: ' + w);
@@ -124,6 +142,7 @@ cmd.addEventListener('keydown', function(e){
     say(['>> ACCES RESPINS. Mai incearca.'], 'bad');
   }
 });
+roomReady();
 </script>
 </body>
 </html>

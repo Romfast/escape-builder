@@ -118,6 +118,7 @@
             <option value="arcade">Arcade pixel</option>
             <option value="chat">Story chat</option>
             <option value="point">Point-and-click</option>
+            <option value="campaign">Campanie multi-stil</option>
           </select>
         </div>
         <div>
@@ -160,6 +161,9 @@
 
 const STORAGE_KEY = 'escape-builder-v1';
 
+const CAMPAIGN_ROTATION = ['classic', 'terminal', 'arcade', 'chat', 'point'];
+const CAMPAIGN_STYLE_NAMES = { classic: 'Clasic', terminal: 'Terminal Retro', arcade: 'Arcade Pixel', chat: 'Story Chat', point: 'Point-and-Click' };
+
 const defaultState = () => ({
   title: 'Comoara ascunsa',
   player: '',
@@ -175,15 +179,32 @@ const defaultState = () => ({
   ]
 });
 
-const blankPuzzle = () => ({ title: '', type: 'free', question: '', answer: '', tfAnswer: 'Adevarat', choices: '', hint: '', letter: '' });
+function normalizePuzzle(p) {
+  const validTypes  = ['free', 'tf', 'choice'];
+  const validStyles = ['', 'classic', 'terminal', 'arcade', 'chat', 'point'];
+  if (typeof p.title    !== 'string') p.title    = '';
+  if (!validTypes.includes(p.type))   p.type     = 'free';
+  if (typeof p.question !== 'string') p.question = '';
+  if (typeof p.answer   !== 'string') p.answer   = '';
+  if (p.tfAnswer !== 'Adevarat' && p.tfAnswer !== 'Fals') p.tfAnswer = 'Adevarat';
+  if (typeof p.choices  !== 'string') p.choices  = '';
+  if (typeof p.hint     !== 'string') p.hint     = '';
+  if (typeof p.letter   !== 'string') p.letter   = '';
+  if (!validStyles.includes(p.style || ''))        p.style    = '';
+  if (typeof p.style    === 'undefined')            p.style    = '';
+  return p;
+}
+
+const blankPuzzle = () => normalizePuzzle({ title: '', type: 'free', question: '', answer: '', tfAnswer: 'Adevarat', choices: '', hint: '', letter: '', style: '' });
 
 let state = Object.assign(defaultState(), load() || {});
+if (Array.isArray(state.puzzles)) state.puzzles = state.puzzles.map(normalizePuzzle);
 
 function load() {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
 }
 function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) { /* quota/private mode — continuă fără autosave (D12) */ }
 }
 
 /* ---------- editor ---------- */
@@ -227,7 +248,20 @@ function puzzleCard(p, i) {
             <option value="choice" ${p.type === 'choice' ? 'selected' : ''}>Variante</option>
           </select>
         </div>
+        ${state.style === 'campaign' ? `
+        <div class="narrow">
+          <label>Stil cameră</label>
+          <select data-f="style">
+            <option value="" ${!p.style ? 'selected' : ''}>Auto (${esc(CAMPAIGN_STYLE_NAMES[CAMPAIGN_ROTATION[i % CAMPAIGN_ROTATION.length]])})</option>
+            <option value="classic" ${p.style === 'classic' ? 'selected' : ''}>Clasic</option>
+            <option value="terminal" ${p.style === 'terminal' ? 'selected' : ''}>Terminal Retro</option>
+            <option value="arcade" ${p.style === 'arcade' ? 'selected' : ''}>Arcade Pixel</option>
+            <option value="chat" ${p.style === 'chat' ? 'selected' : ''}>Story Chat</option>
+            <option value="point" ${p.style === 'point' ? 'selected' : ''}>Point-and-Click</option>
+          </select>
+        </div>` : ''}
       </div>
+      ${state.style === 'campaign' && p.style && !CAMPAIGN_STYLE_NAMES[p.style] ? `<div class="help" style="color:#f87171">Stil necunoscut "${esc(p.style)}" — se foloseste Auto</div>` : ''}
       <label>Intrebarea</label>
       <textarea data-f="question" rows="2">${esc(p.question)}</textarea>
       ${p.type === 'free' ? `
@@ -269,7 +303,11 @@ function esc(s) {
 /* evenimente editor */
 
 document.querySelectorAll('[data-g]').forEach(el => {
-  el.addEventListener('input', () => { state[el.dataset.g] = el.value; onChange(); });
+  el.addEventListener('input', () => {
+    state[el.dataset.g] = el.value;
+    if (el.dataset.g === 'style') renderPuzzles(); /* re-render: style selector per card apare/dispare */
+    onChange();
+  });
 });
 
 puzzleList.addEventListener('input', e => {
@@ -336,6 +374,7 @@ $('#fileLoad').addEventListener('change', e => {
       const data = JSON.parse(txt);
       if (!Array.isArray(data.puzzles)) throw new Error('format');
       state = Object.assign(defaultState(), data);
+      state.puzzles = state.puzzles.map(normalizePuzzle);
       renderGlobals(); renderPuzzles(); onChange();
     } catch (err) {
       alert('Fisierul nu este un proiect valid de escape room.');
@@ -345,6 +384,7 @@ $('#fileLoad').addEventListener('change', e => {
 });
 
 $('#btnExport').addEventListener('click', () => {
+  if (state.puzzles.length === 0) { alert('Adauga cel putin un puzzle inainte de export!'); return; }
   download(slug(state.title) + '.html', gameHTML(cleanState()), 'text/html');
 });
 
@@ -352,7 +392,11 @@ $('#btnReload').addEventListener('click', refreshPreview);
 
 function cleanState() {
   const s = JSON.parse(JSON.stringify(state));
-  s.puzzles.forEach(p => delete p._closed);
+  s.puzzles.forEach(p => {
+    delete p._closed;
+    /* D13: letter normalizat la 1 caracter alfanumeric (bug: un < strică scena SVG din point) */
+    p.letter = (p.letter || '').replace(/[^A-Za-z0-9]/g, '').charAt(0);
+  });
   return s;
 }
 
@@ -379,18 +423,25 @@ function onChange() {
 }
 
 function refreshPreview() {
-  $('#frame').srcdoc = gameHTML(cleanState());
+  if (state.puzzles.length === 0) {
+    $('#frame').srcdoc = '<html><body style="font:system-ui,sans-serif;color:#fff;background:#0d0620;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;padding:20px"><div><div style="font-size:48px;margin-bottom:16px">🚪</div><p style="opacity:.7;line-height:1.6;margin:0">Adaugă cel puțin un puzzle<br>ca să vezi preview-ul.</p></div></body></html>';
+    return;
+  }
+  const previewCfg = cleanState();
+  if (previewCfg.style === 'campaign') previewCfg._noResume = true; /* preview nu reia niciodată (D3) */
+  $('#frame').srcdoc = gameHTML(previewCfg);
 }
 
 /* ---------- template-urile jocului exportat ---------- */
 
 function gameHTML(cfg) {
-  const engines = { classic: gameClassic, terminal: gameTerminal, arcade: gameArcade, chat: gameChat, point: gamePoint };
+  const engines = { classic: gameClassic, terminal: gameTerminal, arcade: gameArcade, chat: gameChat, point: gamePoint, campaign: gameCampaign };
   return (engines[cfg.style] || gameClassic)(cfg);
 }
 
 function gameClassic(cfg) {
-  const json = JSON.stringify(cfg).replace(/</g, '\\u003c');
+  /* cfg === '__TEMPLATE__' → emit sentinel __CFG__ în loc de JSON (D1) */
+  const json = (cfg === '__TEMPLATE__') ? '__CFG__' : JSON.stringify(cfg).replace(/</g, '\\u003c');
   return `<!doctype html>
 <html lang="ro">
 <head>
@@ -609,6 +660,11 @@ function check(given, expected) {
 function next() {
   idx++;
   if (idx < CFG.puzzles.length) { renderPuzzle(); return; }
+  if(CFG._campaign){
+    var L = ''; for(var ci=0;ci<CFG.puzzles.length;ci++){var lc=(CFG.puzzles[ci].letter||'').trim();if(lc)L+=lc.toUpperCase();}
+    try{ parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:L.charAt(0)}); }catch(e){}
+    return;
+  }
   show('sFinal');
   var max = CFG.puzzles.length * 3;
   el('finalStars').textContent = totalStars + ' / ' + max + ' \\u2605';
@@ -644,6 +700,7 @@ function confetti() {
 }
 
 function beep(ok) {
+  if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; }
   try {
     var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
     var t = ctx.currentTime;
@@ -658,6 +715,8 @@ function beep(ok) {
     });
   } catch (e) {}
 }
+window.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };
+if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} }
 <\/script>
 </body>
 </html>`;
@@ -666,7 +725,8 @@ function beep(ok) {
 /* ---------- biblioteca comuna pentru motoarele de joc ---------- */
 
 function libJS(cfg) {
-  const json = JSON.stringify(cfg).replace(/</g, '\\u003c');
+  /* cfg === '__TEMPLATE__' → emit sentinel __CFG__ în loc de JSON real (D1) */
+  const json = (cfg === '__TEMPLATE__') ? '__CFG__' : JSON.stringify(cfg).replace(/</g, '\\u003c');
   return `var CFG = ${json};
 document.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');
 var totalStars = 0;
@@ -677,8 +737,16 @@ function finalWord(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ 
 function choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }
 function choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i < ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }
 function checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); return norm(given) !== '' && norm(given) === norm(exp); }
-function beep(ok){ try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }
-function confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i < 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }`;
+function beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }
+function confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i < 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }
+function roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }
+window.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };
+if(CFG._campaign){
+  /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */
+  var _cs = document.createElement('style');
+  _cs.textContent = 'h1{display:none!important}.progress{display:none!important}.meta{display:none!important}';
+  (document.head || document.documentElement).appendChild(_cs);
+}`;
 }
 
 const SNIP = {};
@@ -776,6 +844,11 @@ SNIP.finalHtml = `<div id="fOverlay"><div class="fcard">
 </div></div>`;
 
 SNIP.finalJs = `function showFinal(){
+  if(CFG._campaign){
+    var L = finalWord().charAt(0);
+    try{ parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:L}); }catch(e){}
+    return;
+  }
   el('fStars').textContent = totalStars + ' / ' + (CFG.puzzles.length * 3) + ' \\u2605';
   var w = finalWord(); var bw = el('fWord'); bw.innerHTML = '';
   for (var j = 0; j < w.length; j++){ var s = document.createElement('span'); s.textContent = w.charAt(j); s.style.animationDelay = (j * 0.18) + 's'; bw.appendChild(s); }
@@ -848,7 +921,10 @@ function echo(text, cls){ var d = document.createElement('div'); d.className = '
 function collected(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += solved[i] ? L.toUpperCase() + ' ' : '_ '; } return w.trim() || '(niciuna)'; }
 
 var bar = '==============================================';
-say([bar, '  ' + CFG.title.toUpperCase(), bar, ' ', (CFG.player ? CFG.player + ', ' : '') + CFG.story, ' ', 'Comenzi: INDICIU, LITERE, AJUTOR. In rest, scrie raspunsul si apasa Enter.'], '', nextPuzzle);
+var introLines = CFG._campaign
+  ? [bar, '  ' + CFG.title.toUpperCase(), bar, 'Comenzi: INDICIU, AJUTOR. Scrie raspunsul si apasa Enter.']
+  : [bar, '  ' + CFG.title.toUpperCase(), bar, ' ', (CFG.player ? CFG.player + ', ' : '') + CFG.story, ' ', 'Comenzi: INDICIU, LITERE, AJUTOR. In rest, scrie raspunsul si apasa Enter.'];
+say(introLines, '', nextPuzzle);
 
 function nextPuzzle(){
   idx++; attempts = 0; hintUsed = false;
@@ -862,6 +938,13 @@ function nextPuzzle(){
 
 function finale(){
   done = true;
+  if(CFG._campaign){
+    var s = totalStars; var L = finalWord().charAt(0);
+    say(['>> CAMERA REZOLVATA! Stele: ' + s + (L ? ' | Litera: ' + L : '')], 'ok', function(){
+      try{ parent.nextRoom({idx:CFG._campaign.idx, stars:s, letter:L}); }catch(e){}
+    });
+    return;
+  }
   var w = finalWord().split('').join(' ');
   var lines = [' ', bar, '   E V A D A R E   R E U S I T A', bar, 'Stele: ' + totalStars + ' / ' + (CFG.puzzles.length * 3)];
   if (w) lines.push('Cuvantul magic: ' + w);
@@ -904,6 +987,7 @@ cmd.addEventListener('keydown', function(e){
     say(['>> ACCES RESPINS. Mai incearca.'], 'bad');
   }
 });
+roomReady();
 <\/script>
 </body>
 </html>`;
@@ -1047,6 +1131,7 @@ document.querySelectorAll('#dpad button').forEach(function(b){
 ${SNIP.modalJs}
 ${SNIP.finalJs}
 updateHud(); draw();
+roomReady();
 <\/script>
 </body>
 </html>`;
@@ -1182,8 +1267,12 @@ function next(){
   seq([(p.title ? p.title + '. ' : '') + p.question], function(){ setComposer(p); });
 }
 
-seq(['Salut' + (CFG.player ? ', ' + CFG.player : '') + '!'].concat(storyChunks()).concat(['Ma ajuti sa ies de aici?']), next);
+var chatIntro = CFG._campaign
+  ? ['Camera ' + (CFG._campaign.idx + 1) + ' din ' + CFG._campaign.total + '. Sa incepem!']
+  : ['Salut' + (CFG.player ? ', ' + CFG.player : '') + '!'].concat(storyChunks()).concat(['Ma ajuti sa ies de aici?']);
+seq(chatIntro, next);
 ${SNIP.finalJs}
+roomReady();
 <\/script>
 </body>
 </html>`;
@@ -1296,6 +1385,568 @@ function updateHud(){
 ${SNIP.modalJs}
 ${SNIP.finalJs}
 updateHud();
+roomReady();
+<\/script>
+</body>
+</html>`;
+}
+
+/* ---------- motor: campanie multi-stil ----------
+ *
+ * ASCII DIAGRAM — contractul parent.*:
+ * ┌──────────── orchestrator (window) ─────────────────────────┐
+ * │  nextRoom({idx,stars,letter})   ← camera.parent.nextRoom   │
+ * │  roomReady(idx)                 ← camera.parent.roomReady  │
+ * │  roomError(idx,msg)             ← camera.parent.roomError  │
+ * │  beep(ok)                       ← camera.parent.beep       │
+ * └────────────────────────────────────────────────────────────┘
+ * idx activ deținut de orchestrator; frame stale ignorate (D5).
+ * nextRoom acceptat o singură dată per idx (idempotență, D4).
+ * Timeout 4s fără roomReady → skip cameră (T3).
+ * srcdoc = TPL[stil].replace(TOKEN, fn) — funcție nu string (D1).
+ * json = JSON.stringify(cfg).replace(/</g,'\\u003c') — D6.
+ */
+
+function gameCampaign(cfg) {
+  const ROTATION = ['classic', 'terminal', 'arcade', 'chat', 'point'];
+
+  /* Template-uri per stil: fiecare motor generat O dată cu sentinel __CFG__ */
+  const stylesNeeded = new Set(cfg.puzzles.map((p, i) => p.style || ROTATION[i % ROTATION.length]));
+  const engines = { classic: gameClassic, terminal: gameTerminal, arcade: gameArcade, chat: gameChat, point: gamePoint };
+  const templates = {};
+  for (const style of stylesNeeded) {
+    templates[style] = (engines[style] || gameClassic)('__TEMPLATE__');
+  }
+
+  const tplJson    = JSON.stringify(templates).replace(/</g, '\\u003c');
+  const masterJson = JSON.stringify(cfg).replace(/</g, '\\u003c');
+  const nRooms     = cfg.puzzles.length;
+  const nStyles    = stylesNeeded.size;
+
+  return `<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(cfg.title)}</title>
+<style>
+/*
+ * ASCII DIAGRAM — contractul parent.*:
+ * ┌──────────── orchestrator (window) ─────────────────────────┐
+ * │  nextRoom({idx,stars,letter})   ← camera.parent.nextRoom   │
+ * │  roomReady(idx)                 ← camera.parent.roomReady  │
+ * │  roomError(idx,msg)             ← camera.parent.roomError  │
+ * │  beep(ok)                       ← camera.parent.beep       │
+ * └────────────────────────────────────────────────────────────┘
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--c-bg, #0d0620); color: var(--c-ink, #fff);
+  display: flex; flex-direction: column;
+  --c-bg: #0d0620; --c-surface: #221440; --c-line: rgba(255,255,255,.18);
+  --c-ink: #fff; --c-gold: #fbbf24;
+}
+#chrome {
+  height: 48px; min-height: 48px; flex-shrink: 0;
+  background: #1a0e3a; border-bottom: 1px solid rgba(255,255,255,.15);
+  display: flex; align-items: center; padding: 0 16px; gap: 12px;
+}
+#chrome-title { font-size: 15px; font-weight: 700; }
+#chrome .sp { flex: 1; }
+#dots { display: flex; gap: 8px; }
+#dots span {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: rgba(255,255,255,.2); transition: background .3s; display: inline-block;
+}
+#dots span.active { background: #a78bfa; }
+#dots span.done   { background: var(--c-gold); }
+#room-wrap { flex: 1; position: relative; min-height: 0; }
+#room-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+/* Overlay-uri */
+.overlay {
+  display: none; position: absolute; inset: 0;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; padding: 24px; text-align: center; overflow-y: auto;
+}
+.overlay.show { display: flex; }
+/* Intro */
+#intro { background: var(--c-bg); }
+#intro h1 { margin: 0; font-size: clamp(22px,5vw,36px); font-weight: 900; }
+#intro .story-text { color: rgba(255,255,255,.8); max-width: 56ch; line-height: 1.6; }
+#intro .promise { color: rgba(255,255,255,.5); font-size: 14px; }
+/* Coridor */
+#corridor { background: var(--c-bg); }
+#corr-reward { display: flex; align-items: center; gap: 16px; }
+#corr-stars { font-size: 26px; letter-spacing: 3px; color: var(--c-gold); }
+#corr-letter { font-size: 56px; font-weight: 900; color: var(--c-gold); line-height: 1; }
+#corr-label { color: rgba(255,255,255,.6); font-size: 13px; }
+#corr-next { color: rgba(255,255,255,.75); font-size: 15px; font-weight: 600; }
+#corr-door { display: flex; align-items: center; justify-content: center; flex: 1; min-height: 0; padding: 8px 0; }
+/* Skip */
+#skip-banner { background: var(--c-bg); }
+/* ===== UȘILE — 5 stiluri × 3 stări ===== */
+:root { --c-gold: #fbbf24; }
+/* Common */
+.door-lock {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,.65); border-radius: 6px; padding: 2px 7px;
+  font-size: 13px; line-height: 1.4; z-index: 2; pointer-events: none;
+}
+@keyframes door-open {
+  0%   { transform: scale(1) rotateY(0deg);    opacity: 1; }
+  50%  { transform: scale(1.06) rotateY(-30deg); opacity: .8; }
+  100% { transform: scale(.85) rotateY(-90deg);  opacity: 0; }
+}
+.opening { animation: door-open .25s cubic-bezier(.4,0,1,1) forwards; transform-origin: left center; perspective: 600px; }
+@media (prefers-reduced-motion: reduce) { .opening { animation: none; opacity: 0; } }
+/* Classic */
+.door-classic {
+  width: 88px; height: 124px; position: relative;
+  background: #fff; border-radius: 10px; border: 1.5px solid rgba(0,0,0,.06);
+  box-shadow: 0 8px 32px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.9);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-classic .dq { font-size: 50px; font-weight: 900; line-height: 1; color: var(--c-gold); text-shadow: 0 2px 14px rgba(251,191,36,.6); user-select: none; }
+.door-classic::after { content: ''; position: absolute; right: 12px; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: rgba(0,0,0,.22); margin-top: -4px; }
+.door-classic.stuck { filter: grayscale(1) brightness(.6); }
+.door-classic.crescendo { transform: scale(1.35); box-shadow: 0 0 0 3px var(--c-gold), 0 14px 48px rgba(251,191,36,.35), 0 8px 32px rgba(0,0,0,.55); }
+/* Terminal */
+.door-terminal {
+  width: 88px; height: 124px; position: relative;
+  background: #000; border: 2px solid #39ff6e; overflow: hidden;
+  box-shadow: 0 0 16px rgba(57,255,110,.4), inset 0 0 12px rgba(57,255,110,.07);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-terminal::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0,0,0,.32) 0 1px, transparent 1px 3px); }
+.door-terminal .dt-txt { font: 700 10px/1.2 "Courier New", monospace; letter-spacing: .12em; color: #39ff6e; text-shadow: 0 0 8px rgba(57,255,110,.75); z-index: 1; }
+.door-terminal .dt-cur { font: 16px/1 "Courier New", monospace; color: #39ff6e; text-shadow: 0 0 8px rgba(57,255,110,.75); animation: dt-blink 1s step-end infinite; z-index: 1; }
+@keyframes dt-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.door-terminal.stuck { filter: grayscale(1) brightness(.55); border-color: #444; box-shadow: none; }
+.door-terminal.stuck .dt-cur { animation: none; opacity: 0; }
+.door-terminal.crescendo { transform: scale(1.35); box-shadow: 0 0 0 2px #39ff6e, 0 0 32px rgba(57,255,110,.7), inset 0 0 18px rgba(57,255,110,.14); }
+/* Arcade */
+.door-arcade {
+  width: 88px; height: 124px; position: relative;
+  background: #18102e; border: 4px solid #4ade80;
+  box-shadow: inset 0 0 0 4px #166534, 0 0 0 4px #0a1606, 0 8px 24px rgba(0,0,0,.7);
+  display: flex; align-items: center; justify-content: center; image-rendering: pixelated;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-arcade::after { content: ''; position: absolute; right: 12px; top: 50%; margin-top: -5px; width: 10px; height: 10px; background: var(--c-gold); box-shadow: inset -2px -2px 0 #b45309, inset 1px 1px 0 #fde68a; }
+.door-arcade .da-sprite { font: 900 24px/1 ui-monospace, monospace; color: #4ade80; text-shadow: 0 0 10px rgba(74,222,128,.55); user-select: none; }
+.door-arcade.stuck { filter: grayscale(1) brightness(.55); box-shadow: none; }
+.door-arcade.crescendo { transform: scale(1.35); box-shadow: inset 0 0 0 4px #166534, 0 0 0 4px #0a1606, 0 0 0 8px #4ade80, 0 0 28px rgba(74,222,128,.5), 0 8px 24px rgba(0,0,0,.7); }
+/* Chat */
+.door-chat {
+  width: 72px; height: 124px; position: relative;
+  background: linear-gradient(165deg, #1d4ed8 0%, #1e3a8a 100%);
+  border-radius: 12px; border: 1.5px solid rgba(255,255,255,.14);
+  box-shadow: 0 8px 28px rgba(29,78,216,.5), inset 0 1px 0 rgba(255,255,255,.2);
+  display: flex; flex-direction: column; align-items: center; padding: 8px 6px 10px; gap: 5px;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-chat .dc-notch { width: 18px; height: 4px; background: rgba(0,0,0,.4); border-radius: 2px; flex-shrink: 0; }
+.door-chat .dc-screen { flex: 1; width: 100%; background: #0f172a; border-radius: 7px; padding: 7px 5px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+.door-chat .dc-bub { border-radius: 8px; padding: 4px 7px; font-size: 9px; color: rgba(255,255,255,.85); line-height: 1.2; max-width: 80%; }
+.door-chat .dc-npc { background: #1e40af; align-self: flex-start; }
+.door-chat .dc-me  { background: #3b82f6; align-self: flex-end; }
+.door-chat .dc-home { width: 22px; height: 3px; background: rgba(255,255,255,.3); border-radius: 2px; flex-shrink: 0; }
+.door-chat.stuck { filter: grayscale(1) brightness(.55); }
+.door-chat.crescendo { transform: scale(1.35); box-shadow: 0 0 0 2px #3b82f6, 0 12px 48px rgba(29,78,216,.7), inset 0 1px 0 rgba(255,255,255,.25); }
+/* Point */
+.door-point { width: 88px; height: 124px; position: relative; display: flex; align-items: center; justify-content: center; transition: transform .25s cubic-bezier(.22,1,.36,1), filter .25s; }
+.door-point svg { width: 88px; height: 124px; display: block; }
+.door-point.stuck { filter: grayscale(1) brightness(.6); }
+.door-point.crescendo { transform: scale(1.35); filter: drop-shadow(0 0 12px rgba(243,207,109,.6)) drop-shadow(0 0 32px rgba(138,90,43,.35)); }
+#skip-banner h2 { margin: 0; font-size: 22px; }
+#skip-code { font-family: ui-monospace, monospace; font-size: 12px; color: rgba(255,255,255,.35); margin-top: 4px; }
+/* Final */
+#finale { background: var(--c-bg); }
+#finale h1 { margin: 0; font-size: 28px; }
+#fin-stars { font-size: 26px; color: var(--c-gold); letter-spacing: 4px; }
+#fin-word { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+#fin-word span {
+  width: 44px; height: 52px; background: var(--accent); border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards;
+}
+@keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+#fin-msg { color: rgba(255,255,255,.8); max-width: 56ch; }
+/* Butoane */
+.btn-main {
+  font: inherit; font-size: 16px; font-weight: 700;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 12px; padding: 14px 28px; cursor: pointer;
+  min-height: 44px; width: 100%; max-width: 320px;
+}
+.btn-main:hover { filter: brightness(1.1); }
+.btn-main:disabled { opacity: .5; cursor: not-allowed; }
+.btn-skip {
+  font: inherit; font-size: 15px; font-weight: 700;
+  background: #4b5563; color: #fff; border: none;
+  border-radius: 12px; padding: 12px 24px; cursor: pointer; min-height: 44px;
+}
+.confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }
+@keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
+@media (max-width: 599px) {
+  #chrome { height: 40px; min-height: 40px; }
+  #chrome-title { font-size: 13px; }
+  #dots span { width: 8px; height: 8px; }
+}
+</style>
+</head>
+<body>
+
+<div id="chrome">
+  <span id="chrome-title">${esc(cfg.title)}</span>
+  <div class="sp"></div>
+  <div id="dots"></div>
+</div>
+
+<div id="room-wrap">
+  <iframe id="room-frame" data-room title="Camera curentă"></iframe>
+
+  <div id="intro" class="overlay show">
+    <h1 id="intro-title"></h1>
+    <p class="story-text" id="intro-story"></p>
+    <p class="promise" id="intro-promise"></p>
+    <button class="btn-main" id="btn-start">Începe aventura</button>
+  </div>
+
+  <div id="corridor" class="overlay">
+    <div id="corr-reward">
+      <div>
+        <div id="corr-label">Litera câștigată</div>
+        <div id="corr-letter"></div>
+      </div>
+      <div id="corr-stars"></div>
+    </div>
+    <div id="corr-door"></div>
+    <div id="corr-next"></div>
+    <button class="btn-main" id="btn-next">Deschide ușa →</button>
+  </div>
+
+  <div id="skip-banner" class="overlay">
+    <h2>⚠️ Ușa asta e înțepenită!</h2>
+    <div id="skip-door"></div>
+    <p>Camera nu a răspuns. Poți sări la cea următoare.</p>
+    <div class="skip-code" id="skip-code"></div>
+    <button class="btn-skip" id="btn-skip">Sari la camera următoare</button>
+  </div>
+
+  <div id="finale" class="overlay" data-final>
+    <h1>🏆 Evadare reușită!</h1>
+    <div class="fstars" id="fin-stars"></div>
+    <p>Cuvântul magic:</p>
+    <div id="fin-word"></div>
+    <p id="fin-msg"></p>
+  </div>
+</div>
+
+<script>
+/*
+ * ASCII DIAGRAM — contractul parent.*:
+ * ┌──────────── orchestrator (window) ─────────────────────────┐
+ * │  nextRoom({idx,stars,letter})   ← camera.parent.nextRoom   │
+ * │  roomReady(idx)                 ← camera.parent.roomReady  │
+ * │  roomError(idx,msg)             ← camera.parent.roomError  │
+ * │  beep(ok)                       ← camera.parent.beep       │
+ * └────────────────────────────────────────────────────────────┘
+ * Idempotență: nextRoom/roomError acceptate doar de la activeWindow.
+ * roomDone[idx]=true după primul nextRoom → duplicatele ignorate.
+ * Timeout 4s → skipRoom → aceeași compoziție de coridor (D5).
+ */
+var TPL    = ${tplJson};
+var MASTER = ${masterJson};
+var ROTATION = ['classic','terminal','arcade','chat','point'];
+var TOKEN    = '__CFG__';
+
+document.documentElement.style.setProperty('--accent', MASTER.color || '#6d28d9');
+
+var N          = MASTER.puzzles.length;
+var totalStars = 0;
+var collected  = [];
+var skipped    = {};
+
+var activeIdx    = -1;
+var activeWindow = null;
+var readyTimer   = null;
+var roomDone     = {};
+
+/* ----- Resume — safeStore (D3) + djb2 hash (D11) ----- */
+function djb2(s){
+  var h = 5381;
+  for(var i=0;i<s.length;i++) h = ((h<<5)+h) ^ s.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+var _RESUME_KEY = 'esc-camp-' + djb2(JSON.stringify(MASTER));
+function safeGet(){ try{ return JSON.parse(sessionStorage.getItem(_RESUME_KEY)); }catch(e){ return null; } }
+function safeSet(v){ try{ sessionStorage.setItem(_RESUME_KEY, JSON.stringify(v)); }catch(e){ /* webview restrictat — continuă fără resume */ } }
+function saveProgress(){
+  safeSet({ idx: activeIdx, totalStars: totalStars, collected: collected.slice(), skipped: skipped });
+}
+function clearProgress(){ try{ sessionStorage.removeItem(_RESUME_KEY); }catch(e){} }
+
+var frameEl     = document.getElementById('room-frame');
+var introEl     = document.getElementById('intro');
+var corridorEl  = document.getElementById('corridor');
+var skipEl      = document.getElementById('skip-banner');
+var finaleEl    = document.getElementById('finale');
+
+/* ----- Dots ----- */
+function buildDots(){
+  var d = document.getElementById('dots'); d.innerHTML = '';
+  for(var i=0;i<N;i++){
+    var s = document.createElement('span');
+    s.id = 'dot-'+i;
+    s.setAttribute('aria-label','Camera '+(i+1)+' din '+N);
+    d.appendChild(s);
+  }
+}
+function setDot(i,cls){ var d=document.getElementById('dot-'+i); if(d) d.className=cls; }
+
+/* ----- Ușa coridorului (§Design pct.7) ----- */
+function doorHtml(style, isLast, isStuck){
+  var cls = (isLast ? ' crescendo' : '') + (isStuck ? ' stuck' : '');
+  var lock = isStuck ? '<span class="door-lock">&#128274;</span>' : '';
+  if(style === 'classic') return '<div class="door-classic'+cls+'"><span class="dq">?</span>'+lock+'</div>';
+  if(style === 'terminal') return '<div class="door-terminal'+cls+'"><span class="dt-txt">'+(isStuck?'BLOCKED':'ACCESS')+'</span>'+(isStuck?'':' <span class="dt-cur">_</span>')+lock+'</div>';
+  if(style === 'arcade') return '<div class="door-arcade'+cls+'"><span class="da-sprite">&#9654;</span>'+lock+'</div>';
+  if(style === 'chat') return '<div class="door-chat'+cls+'"><div class="dc-notch"></div><div class="dc-screen"><div class="dc-bub dc-npc">Salut!</div><div class="dc-bub dc-me">?</div></div><div class="dc-home"></div>'+lock+'</div>';
+  if(style === 'point') return '<div class="door-point'+cls+'"><svg viewBox="0 0 88 124" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="84" height="120" rx="6" fill="#5a3518"/><rect x="6" y="6" width="76" height="112" rx="4" fill="#7c4f2c"/><rect x="10" y="10" width="30" height="44" rx="3" fill="rgba(0,0,0,.22)"/><rect x="48" y="10" width="30" height="44" rx="3" fill="rgba(0,0,0,.22)"/><rect x="10" y="62" width="68" height="52" rx="3" fill="rgba(0,0,0,.15)"/><circle cx="67" cy="70" r="8" fill="#c8952a"/><circle cx="67" cy="70" r="5" fill="#f3cf6d"/><circle cx="67" cy="70" r="2" fill="#a07022"/><circle cx="32" cy="87" r="13" fill="none" stroke="#f3cf6d" stroke-width="3"/><line x1="42" y1="97" x2="50" y2="105" stroke="#f3cf6d" stroke-width="3.5" stroke-linecap="round"/></svg>'+lock+'</div>';
+  return doorHtml('point', isLast, isStuck); /* fallback */
+}
+
+/* ----- Beep — singurul AudioContext (D2) ----- */
+function beep(ok){
+  try{
+    var ctx=beep._ctx||(beep._ctx=new(window.AudioContext||window.webkitAudioContext)());
+    var t=ctx.currentTime; var fs=ok?[523,784]:[196];
+    fs.forEach(function(f,k){
+      var o=ctx.createOscillator(),g=ctx.createGain();
+      o.frequency.value=f; o.type='triangle';
+      g.gain.setValueAtTime(0.12,t+k*0.09);
+      g.gain.exponentialRampToValueAtTime(0.001,t+k*0.09+0.25);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t+k*0.09); o.stop(t+k*0.09+0.3);
+    });
+  }catch(e){}
+}
+
+/* ----- parent.* API ----- */
+
+window.nextRoom = function(data){
+  /* Guard: doar de la camera activă (D5) */
+  if(!activeWindow || frameEl.contentWindow !== activeWindow){
+    console.log('[campaign] nextRoom ignorat — frame stale'); return;
+  }
+  var idx = data ? +data.idx : activeIdx;
+  /* Idempotență (D4) */
+  if(roomDone[idx]){ console.log('[campaign] nextRoom ignorat — idx deja încheiat', idx); return; }
+  if(idx !== activeIdx){ console.log('[campaign] nextRoom idx mismatch ignorat'); return; }
+  clearTimeout(readyTimer);
+  roomDone[idx] = true;
+  totalStars += (data.stars || 0);
+  var letter = String(data.letter || '').replace(/[^A-Za-z0-9]/g,'').charAt(0).toUpperCase();
+  if(letter) collected.push(letter);
+  setDot(idx,'done');
+  saveProgress();
+  console.log('[campaign] camera',idx,'done. stars=',data.stars,'letter=',letter);
+  var next = idx + 1;
+  if(next >= N){ clearProgress(); showFinale(); } else { showCorridor(idx, data, next); }
+};
+
+window.roomReady = function(idx){
+  console.log('[campaign] roomReady',idx);
+  if(+idx !== activeIdx) return;
+  clearTimeout(readyTimer);
+  frameEl.setAttribute('data-room-ready','true'); /* hook pentru tests */
+};
+
+window.roomError = function(idx, msg){
+  console.warn('[campaign] roomError',idx,msg);
+  /* roomError are semantică ORICÂND (post-ready inclus, D5) */
+  if(!activeWindow || frameEl.contentWindow !== activeWindow) return;
+  if(+idx !== activeIdx) return;
+  if(roomDone[idx]) return;
+  skipRoom(+idx, String(msg||'eroare'));
+};
+
+/* ----- Timeout 4s → skip (T3) ----- */
+function startReadyTimer(idx){
+  clearTimeout(readyTimer);
+  readyTimer = setTimeout(function(){
+    if(roomDone[idx]) return;
+    console.warn('[campaign] timeout 4s — skip',idx);
+    skipRoom(idx,'timeout');
+  }, 4000);
+}
+
+function skipRoom(idx, reason){
+  clearTimeout(readyTimer);
+  roomDone[idx] = true;
+  skipped[idx]  = true;
+  setDot(idx,'done');
+  saveProgress();
+  var style = (MASTER.puzzles[idx]&&(MASTER.puzzles[idx].style||ROTATION[idx%5]))||'?';
+  var code  = style + '\\u00b7' + idx;
+  showSkipBanner(idx, code, reason);
+}
+
+/* ----- Montare cameră ----- */
+function mountRoom(idx){
+  activeIdx = idx;
+  var puzzle = MASTER.puzzles[idx];
+  var style  = (puzzle&&puzzle.style) || ROTATION[idx % ROTATION.length];
+  var tpl    = TPL[style];
+  if(!tpl){
+    /* stil negăsit în template-uri — skip imediat */
+    console.warn('[campaign] template lipsă pentru stil',style);
+    skipRoom(idx,'template lipsă: '+style); return;
+  }
+  var camCfg = {
+    title: MASTER.title, player: MASTER.player, color: MASTER.color,
+    style: style, charName: MASTER.charName,
+    story: MASTER.story, finalMessage: MASTER.finalMessage,
+    puzzles: [puzzle],
+    _campaign: {
+      idx: idx, total: N,
+      stars: totalStars, letters: collected.slice(), deadline: null
+    }
+  };
+  /* json cu replace-funcție (D1 + D6) */
+  var json   = JSON.stringify(camCfg).replace(/</g,'\\u003c');
+  var srcdoc = tpl.replace(TOKEN, function(){ return json; });
+
+  hideAll();
+  setDot(idx,'active');
+  activeWindow = null;
+  frameEl.removeAttribute('data-room-ready');
+  frameEl.srcdoc = srcdoc;
+  setTimeout(function(){ activeWindow = frameEl.contentWindow; }, 0);
+  startReadyTimer(idx);
+
+  var isLast = (idx === N - 1);
+  document.getElementById('chrome-title').textContent = isLast
+    ? MASTER.title + ' — Ultima cameră!' : MASTER.title;
+  console.log('[campaign] montat camera',idx,'stil',style);
+}
+
+/* ----- Coridor ----- */
+function showCorridor(doneIdx, data, nextIdx){
+  hideAll();
+  var s = data.stars || 0; var stars = '';
+  for(var i=0;i<s;i++) stars += '\\u2605';
+  document.getElementById('corr-stars').textContent = stars || '\\u2606';
+  var letter = String(data.letter||'').replace(/[^A-Za-z0-9]/g,'').charAt(0).toUpperCase();
+  document.getElementById('corr-letter').textContent = letter || '\\u2014';
+  var styleNames = {classic:'Clasic',terminal:'Terminal Retro',arcade:'Arcade Pixel',chat:'Story Chat',point:'Point-and-Click'};
+  var nextStyle  = (MASTER.puzzles[nextIdx] && (MASTER.puzzles[nextIdx].style || ROTATION[nextIdx%5])) || 'classic';
+  var isLast     = (nextIdx === N - 1);
+  document.getElementById('corr-next').textContent =
+    isLast ? '\\u2605 Ultima cameră!' : 'Camera '+(nextIdx+1)+' — '+styleNames[nextStyle];
+  /* Ușa ca erou (§Design pct.2 + pct.6) */
+  var doorEl = document.getElementById('corr-door');
+  doorEl.innerHTML = doorHtml(nextStyle, isLast, false);
+  corridorEl.classList.add('show');
+  var btn = document.getElementById('btn-next');
+  btn.disabled = false;
+  btn.onclick = function(){
+    btn.disabled = true; /* idempotență buton (T4) */
+    /* Animație deschidere ușă ~250ms (§Design pct.4) */
+    var d = doorEl.firstElementChild;
+    if(d) d.classList.add('opening');
+    setTimeout(function(){ mountRoom(nextIdx); }, 280);
+  };
+}
+
+/* ----- Skip banner ----- */
+function showSkipBanner(idx, code, reason){
+  hideAll();
+  var stuckStyle = (MASTER.puzzles[idx] && (MASTER.puzzles[idx].style || ROTATION[idx%5])) || 'classic';
+  document.getElementById('skip-door').innerHTML = doorHtml(stuckStyle, false, true);
+  document.getElementById('skip-code').textContent = 'Cod: ' + code + ' (' + reason + ')';
+  skipEl.classList.add('show');
+  var next = idx + 1;
+  var btn  = document.getElementById('btn-skip');
+  btn.disabled = false;
+  btn.onclick = function(){
+    btn.disabled = true;
+    if(next >= N){ showFinale(); } else { showCorridor(idx,{stars:0,letter:''},next); }
+  };
+}
+
+/* ----- Final ----- */
+function showFinale(){
+  hideAll(); finaleEl.classList.add('show');
+  var wEl = document.getElementById('fin-word'); wEl.innerHTML = '';
+  collected.forEach(function(l,j){
+    var s = document.createElement('span');
+    s.textContent = l;
+    s.style.animationDelay = (j*0.18)+'s';
+    wEl.appendChild(s);
+  });
+  /* dăle-lacăt pentru camere sărite */
+  Object.keys(skipped).forEach(function(i){
+    var s = document.createElement('span');
+    s.textContent = '\\uD83D\\uDD12'; /* 🔒 */
+    s.title = 'Camera '+(+i+1)+' sărită';
+    s.style.fontSize = '22px';
+    wEl.appendChild(s);
+  });
+  document.getElementById('fin-stars').textContent = totalStars + ' / ' + (N*3) + ' \\u2605';
+  var msg = MASTER.finalMessage || '';
+  var pl  = MASTER.player || '';
+  document.getElementById('fin-msg').textContent = pl ? pl+', '+msg.charAt(0).toLowerCase()+msg.slice(1) : msg;
+  beep(true); confetti();
+}
+
+/* ----- Confetti ----- */
+function confetti(){
+  var colors=[MASTER.color||'#6d28d9','#fbbf24','#34d399','#60a5fa','#f472b6'];
+  for(var i=0;i<90;i++){
+    var c=document.createElement('div'); c.className='confetti';
+    c.style.left=(i*137%100)+'vw'; c.style.background=colors[i%colors.length];
+    c.style.animationDuration=(2.2+(i*53%18)/10)+'s';
+    c.style.animationDelay=((i*31%14)/10)+'s';
+    document.body.appendChild(c);
+  }
+}
+
+function hideAll(){
+  [introEl,corridorEl,skipEl,finaleEl].forEach(function(el){ el.classList.remove('show'); });
+}
+
+/* ----- Intro ----- */
+document.getElementById('intro-title').textContent = MASTER.title;
+document.getElementById('intro-story').textContent = (MASTER.player?'Salut, '+MASTER.player+'! ':'')+MASTER.story;
+document.getElementById('intro-promise').textContent = N+' camere \\u00b7 ${nStyles} stiluri \\u00b7 1 cuvânt magic';
+document.getElementById('btn-start').onclick = function(){ clearProgress(); mountRoom(0); };
+
+buildDots();
+
+/* ----- Resume la reload (D11) ----- */
+(function tryResume(){
+  if(MASTER._noResume) return; /* preview-ul nu reia niciodată */
+  var saved = safeGet();
+  if(!saved || typeof saved.idx !== 'number' || saved.idx < 0) return;
+  /* restaurăm starea */
+  totalStars = saved.totalStars || 0;
+  collected  = saved.collected  || [];
+  skipped    = saved.skipped    || {};
+  Object.keys(skipped).forEach(function(k){ roomDone[+k] = true; setDot(+k,'done'); });
+  /* repornim de la coridorul camerei next */
+  var resumeIdx = saved.idx + 1;
+  if(resumeIdx >= N){
+    /* ultima cameră deja terminată — mergi direct la final */
+    showFinale(); return;
+  }
+  showCorridor(saved.idx, {stars:0, letter: (collected[collected.length-1]||'')}, resumeIdx);
+})();
 <\/script>
 </body>
 </html>`;
