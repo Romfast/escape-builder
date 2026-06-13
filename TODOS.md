@@ -18,7 +18,7 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
 - [x] **Audit a11y motoare** — LIVRAT (vezi §dedicată mai jos). Smoke 26/26.
 
 **PR2 livrat (2026-06-13):** audio camere `651025b`, voce `da93d84`, unificare `ab11089`, a11y (acest commit).
-Rămas din Etapa 2: D7 (migrare classic pe libJS+SNIP) + muzică timer (T10) + Adventure Mode v0.
+Rămas din Etapa 2: muzică timer (T10) + Adventure Mode v0. (D7 LIVRAT — vezi §dedicată mai jos.)
 
 ### [x] Bomberman polish (feedback user 2026-06-13) — LIVRAT
 Trei probleme raportate + o lipsă, toate în `gameArcade` (`escape-builder.html`):
@@ -134,11 +134,35 @@ Acum trăiește o singură dată în `libJS.campaignDone()` (lângă `roomReady`
 Verificat: smoke 25/25 (terminal standalone test 2 + camere terminal în campanie E2E test 1).
 Referință: planul §Etapa 2 pct. 1; D7.
 
-### [ ] D7 rămas: migrarea `gameClassic` pe `libJS+SNIP`
-- Classic (escape-builder.html:451) e singurul motor bespoke: propriul `totalStars`, `beep`,
-  inline `finalWord` (dublat de 2 ori în `next()`), propriul modal final `#sFinal`.
-- După migrare: classic folosește `libJS.campaignDone()` + `SNIP` ca celelalte 4 → 5/5 uniform.
-- Necesită regresie manuală pe classic standalone (e demo-ul implicit, cel mai vizibil).
+### [x] D7: migrarea `gameClassic` pe `libJS` — LIVRAT (2026-06-13)
+Classic era ultimul motor bespoke (propriul `CFG`/`norm`/`beep`/`confetti`, star-logic inline,
+`finalWord` dublat, payload `parent.nextRoom` inline). Acum injectează `libJS(cfg)` și folosește
+`checkAnswer`/`starsFor`/`finalWord`/`choiceOpts`/`campaignDone`/`roomReady`/`onerror` din libJS
+ca celelalte 4 motoare → **5/5 uniform** pe contractul de finalizare.
+- **Decizie de design (păstrată din unificarea `campaignDone`):** UI-ul bespoke al classicului
+  (card `sStart`/`sGame`/`sFinal`) RĂMÂNE. NU am forțat modalul/overlay-ul `SNIP.modal`/`SNIP.final`
+  — classic e quiz inline (nu deschide puzzle-uri dintr-o hartă), iar `#sFinal` e on-theme; forțarea
+  SNIP-ului ar fi regresie vizuală pe demo-ul implicit (cel mai vizibil). Aceeași logică ca terminalul
+  cu finale CRT. „Migrare pe libJS+SNIP" din formularea inițială = în practică migrare pe **libJS**;
+  SNIP-ul modal nu se aplică unui motor non-modal (vezi și terminalul, care nu folosește SNIP.modal).
+- net −70 linii duplicate; `campaignDone()` rămâne singura sursă a payload-ului `nextRoom`.
+- `exemplu-clasic.html` regenerat (celelalte demo-uri byte-identice → classic a fost singura atingere).
+- Verificat: smoke 28/28 (regresie classic standalone test #1 + campanie E2E cu classic ca odaie test #14).
+Commit: `bfe9be2`.
+
+### [x] Known improvements — pasă de igienă (2026-06-13)
+Auditate faptic. Cele mai multe erau **deja livrate** în PR-uri anterioare:
+- `persist()` try/catch → DEJA (escape-builder.html:211, D12).
+- `esc(L)` la point SVG → DEJA rezolvat la SURSĂ: `cleanState()` normalizează `letter` la 1 caracter
+  alfanumeric (linia ~407, D13) → un `<` nu mai poate ajunge în scenă.
+- Validare 0 puzzle-uri → DEJA: export blocat cu alert + preview cu mesaj ghidant (🚪).
+- `updateHud` „identic" arcade/point → NU era identic (arcade arată vieți/dușmani/bombe/rază; point
+  arată obiecte). REAL duplicat: scor + bara de litere câștigate → extras în `SNIP.hudJs`
+  (`hudLetters(isSolved)`, `isSolved(j)` diferă per motor: doorsSolved vs solvedFlags). Injectat în
+  ambele; demo-uri arcade+point regenerate.
+- **Stil top-level invalid la import** (singurul gap rămas, T5/D8) → `TOP_STYLES` guard: fallback la
+  `classic` + alert „Stil necunoscut …" la import; idem la load din storage corupt. Test nou smoke
+  (`stil top-level necunoscut → fallback classic + avertisment`).
 
 ### [x] Audit a11y motoare existente — LIVRAT (sub harness Playwright)
 Auditat faptic (măsurat, nu presupus). Ce era DEJA OK (din restyle S3, nemodificat):
@@ -184,8 +208,6 @@ Referință: §Design pct. 13 (TD5, PR2); D19 din plan.
 
 ## Known improvements (oricând)
 
-- **`updateHud` duplicat**: arcade linia 1003 și point linia 1283 au funcții identice → consolidat în `SNIP` (T8 din plan, igienă PR1).
-- **`persist()` fără try/catch**: builder-ul poate crăpa pe storage plin → guard (D12, T8).
-- **`esc(L)` la inserția innerHTML din point** (:1274): un `<` în câmpul `letter` strică scena SVG (D13, T8).
-- **Validare 0 puzzle-uri**: export și preview blocate cu mesaj ghidant (T5).
-- **Stil invalid la import JSON**: avertisment în builder + rotație automată (T5, D8).
+Toate cele listate inițial au fost rezolvate — vezi „[x] Known improvements — pasă de igienă" mai sus
+(updateHud dedup în `SNIP.hudJs`, persist guard D12, esc/letter D13, validare 0 puzzle, stil invalid la
+import T5/D8). Adaugă aici lucruri noi pe măsură ce apar.

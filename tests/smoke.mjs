@@ -404,6 +404,34 @@ test.describe('Edge cases @regresie', () => {
     expect(errors, 'Erori consola:\n' + errors.join('\n')).toHaveLength(0);
   });
 
+  test('builder: JSON cu stil top-level necunoscut → fallback classic + avertisment (T5/D8)', async ({ page }) => {
+    const errors = trackErrors(page);
+    let warned = false;
+    page.on('dialog', d => { if (/stil necunoscut/i.test(d.message())) warned = true; d.accept(); });
+
+    await page.goto(fileURL('escape-builder.html'));
+
+    const tmpPath = join(ROOT, 'tests', '.tmp-invalid-style.json');
+    writeFileSync(tmpPath, JSON.stringify({
+      title: 'Test stil', style: 'banana', color: '#6d28d9', charName: 'X',
+      story: 'S', finalMessage: 'F',
+      puzzles: [{ title: 'P1', type: 'free', question: 'Q?', answer: 'A', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'X' }]
+    }));
+
+    try {
+      await page.locator('#fileLoad').setInputFiles(tmpPath);
+      await page.waitForTimeout(600);
+    } finally {
+      unlinkSync(tmpPath);
+    }
+
+    // Fallback la classic + avertisment + builder functional
+    await expect(page.locator('#gStyle')).toHaveValue('classic');
+    expect(warned, 'asteptam un alert despre stilul necunoscut').toBe(true);
+    await expect(page.locator('#addPuzzle')).toBeVisible();
+    expect(errors, 'Erori consola:\n' + errors.join('\n')).toHaveLength(0);
+  });
+
 });
 
 // ═══════════════════════════════════════════════════════════════════════

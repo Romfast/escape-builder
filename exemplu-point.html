@@ -155,14 +155,15 @@ function onSolved(i){
 
 function updateHud(){
   el('hudStep').textContent = 'Obiecte: ' + solvedCount + '/' + N;
+  hudLetters(function(j){ return solvedFlags[j]; });
+}
+function hudLetters(isSolved){
   el('hudStars').textContent = totalStars + ' \u2605';
   var hb = el('hudLetters'); hb.innerHTML = '';
-  for (var j = 0; j < N; j++) {
-    var L = (CFG.puzzles[j].letter || '').trim();
-    if (!L) continue;
+  for (var j = 0; j < CFG.puzzles.length; j++){
+    var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue;
     var s = document.createElement('span');
-    if (solvedFlags[j]) { s.textContent = L.toUpperCase(); s.className = 'won'; }
-    else s.textContent = '?';
+    if (isSolved(j)){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?';
     hb.appendChild(s);
   }
 }

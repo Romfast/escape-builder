@@ -206,9 +206,7 @@ function updateHud(){
   var solved = puzzleProgress ? puzzleProgress.doorsSolved.filter(Boolean).length : 0;
   var alive = enemies ? enemies.filter(function(e){ return e.alive; }).length : 0;
   el('hudStep').textContent = '\u2764\ufe0f ' + lives + '   \ud83d\udc7e ' + alive + '   \ud83d\udd13 ' + solved + '/' + N + '   \ud83d\udca3' + (maxBombs || 1) + '   \ud83d\udd25' + (bombRange || 1);
-  el('hudStars').textContent = totalStars + ' \u2605';
-  var hb = el('hudLetters'); hb.innerHTML = '';
-  for (var j = 0; j < N; j++){ var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue; var s = document.createElement('span'); if (puzzleProgress && puzzleProgress.doorsSolved[j]){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?'; hb.appendChild(s); }
+  hudLetters(function(j){ return puzzleProgress && puzzleProgress.doorsSolved[j]; });
 }
 
 /* ----- Bombe + explozii în lanț ----- */
@@ -375,6 +373,16 @@ window.__game = {
   getTile: function(x, y){ return map && map[y] ? map[y][x] : -1; }
 };
 
+function hudLetters(isSolved){
+  el('hudStars').textContent = totalStars + ' \u2605';
+  var hb = el('hudLetters'); hb.innerHTML = '';
+  for (var j = 0; j < CFG.puzzles.length; j++){
+    var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue;
+    var s = document.createElement('span');
+    if (isSolved(j)){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?';
+    hb.appendChild(s);
+  }
+}
 var mIdx = -1, mAtt = 0, mHint = false, mCb = null;
 el('mHintBtn').onclick = function(){ mHint = true; el('mHintText').style.display = 'block'; };
 el('mClose').onclick = function(){ el('mOverlay').style.display = 'none'; };

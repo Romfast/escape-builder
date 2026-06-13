@@ -5,7 +5,7 @@ Smoke + regresie + campanie E2E pentru jocurile generate. Verifică faptic: fiec
 până la ecranul final, fără erori de consolă.
 
 ## Ownership
-- `tests/smoke.mjs` — unicul fișier de teste (~27 teste).
+- `tests/smoke.mjs` — unicul fișier de teste (~28 teste).
 - `playwright.config.mjs` (la root, **gitignored**) — config dev.
 
 ## Local Contracts
@@ -20,7 +20,7 @@ până la ecranul final, fără erori de consolă.
   bomberman gameplay + bomberman rază/powerup-uri) și `@campanie` (12 — intro→hartă→camere→final, resume,
   cameră moartă, idempotență ușă, `$`/`$&`, beep, mobil, audio S1, voce/narațiune D10,
   a11y tap/aria/reduced-motion, navigare overworld).
-- **Status țintă: 27/27 PASS.**
+- **Status țintă: 28/28 PASS.**
 
 ## Work Guidance
 - După modificări la motoare (`escape-builder.html`): rulează suita completă; extinde `@regresie` dacă
@@ -29,7 +29,7 @@ până la ecranul final, fără erori de consolă.
 
 ## Verification
 ```bash
-npx playwright test tests/smoke.mjs                    # 27/27
+npx playwright test tests/smoke.mjs                    # 28/28
 npx playwright test tests/smoke.mjs --grep @regresie
 npx playwright test tests/smoke.mjs --grep @campanie
 ```

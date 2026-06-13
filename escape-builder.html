@@ -166,6 +166,8 @@ const STORAGE_KEY = 'escape-builder-v1';
 
 const CAMPAIGN_ROTATION = ['classic', 'terminal', 'arcade', 'chat', 'point'];
 const CAMPAIGN_STYLE_NAMES = { classic: 'Clasic', terminal: 'Terminal Retro', arcade: 'Arcade Pixel', chat: 'Story Chat', point: 'Point-and-Click' };
+/* Stiluri top-level valide (gameHTML rutează pe ele); orice altceva → fallback classic (T5, D8) */
+const TOP_STYLES = ['classic', 'terminal', 'arcade', 'chat', 'point', 'campaign'];
 
 const defaultState = () => ({
   title: 'Comoara ascunsa',
@@ -202,6 +204,7 @@ function normalizePuzzle(p) {
 const blankPuzzle = () => normalizePuzzle({ title: '', type: 'free', question: '', answer: '', tfAnswer: 'Adevarat', choices: '', hint: '', letter: '', style: '' });
 
 let state = Object.assign(defaultState(), load() || {});
+if (!TOP_STYLES.includes(state.style)) state.style = 'classic'; /* storage corupt → fallback */
 if (Array.isArray(state.puzzles)) state.puzzles = state.puzzles.map(normalizePuzzle);
 
 function load() {
@@ -383,8 +386,11 @@ $('#fileLoad').addEventListener('change', e => {
       const data = JSON.parse(txt);
       if (!Array.isArray(data.puzzles)) throw new Error('format');
       state = Object.assign(defaultState(), data);
+      let styleWarn = '';
+      if (!TOP_STYLES.includes(state.style)) { styleWarn = ' Stil necunoscut „' + state.style + '" — am rotit la „Clasic".'; state.style = 'classic'; }
       state.puzzles = state.puzzles.map(normalizePuzzle);
       renderGlobals(); renderPuzzles(); onChange();
+      if (styleWarn) alert('Proiect incarcat.' + styleWarn);
     } catch (err) {
       alert('Fisierul nu este un proiect valid de escape room.');
     }
@@ -830,6 +836,19 @@ SNIP.finalJs = `function showFinal(){
 }
 el('fAgain').onclick = function(){ location.reload(); };`;
 
+/* HUD partajat (arcade + point): scor + bara de litere câștigate. isSolved(j)→bool
+   diferă per motor (doorsSolved vs solvedFlags) → injectat ca funcție (T8). */
+SNIP.hudJs = `function hudLetters(isSolved){
+  el('hudStars').textContent = totalStars + ' \\u2605';
+  var hb = el('hudLetters'); hb.innerHTML = '';
+  for (var j = 0; j < CFG.puzzles.length; j++){
+    var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue;
+    var s = document.createElement('span');
+    if (isSolved(j)){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?';
+    hb.appendChild(s);
+  }
+}`;
+
 /* ---------- motor: terminal retro ---------- */
 
 function gameTerminal(cfg) {
@@ -1111,9 +1130,7 @@ function updateHud(){
   var solved = puzzleProgress ? puzzleProgress.doorsSolved.filter(Boolean).length : 0;
   var alive = enemies ? enemies.filter(function(e){ return e.alive; }).length : 0;
   el('hudStep').textContent = '\\u2764\\ufe0f ' + lives + '   \\ud83d\\udc7e ' + alive + '   \\ud83d\\udd13 ' + solved + '/' + N + '   \\ud83d\\udca3' + (maxBombs || 1) + '   \\ud83d\\udd25' + (bombRange || 1);
-  el('hudStars').textContent = totalStars + ' \\u2605';
-  var hb = el('hudLetters'); hb.innerHTML = '';
-  for (var j = 0; j < N; j++){ var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue; var s = document.createElement('span'); if (puzzleProgress && puzzleProgress.doorsSolved[j]){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?'; hb.appendChild(s); }
+  hudLetters(function(j){ return puzzleProgress && puzzleProgress.doorsSolved[j]; });
 }
 
 /* ----- Bombe + explozii în lanț ----- */
@@ -1280,6 +1297,7 @@ window.__game = {
   getTile: function(x, y){ return map && map[y] ? map[y][x] : -1; }
 };
 
+${SNIP.hudJs}
 ${SNIP.modalJs}
 ${SNIP.finalJs}
 init();
@@ -1527,17 +1545,9 @@ function onSolved(i){
 
 function updateHud(){
   el('hudStep').textContent = 'Obiecte: ' + solvedCount + '/' + N;
-  el('hudStars').textContent = totalStars + ' \\u2605';
-  var hb = el('hudLetters'); hb.innerHTML = '';
-  for (var j = 0; j < N; j++) {
-    var L = (CFG.puzzles[j].letter || '').trim();
-    if (!L) continue;
-    var s = document.createElement('span');
-    if (solvedFlags[j]) { s.textContent = L.toUpperCase(); s.className = 'won'; }
-    else s.textContent = '?';
-    hb.appendChild(s);
-  }
+  hudLetters(function(j){ return solvedFlags[j]; });
 }
+${SNIP.hudJs}
 ${SNIP.modalJs}
 ${SNIP.finalJs}
 updateHud();
