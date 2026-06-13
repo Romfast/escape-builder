@@ -23,13 +23,19 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
       Fix: deblocare ctx în handler-ul `btn-start` (gest direct pe părinte), `escape-builder.html:1928`.
       Verificat: `scratch/verify-audio-s1.mjs` → ctx `running` după start (era `NO_CTX`). Smoke 21/21.
       TODO la S4: portează asertarea `beep._ctx.state==='running'` în `tests/smoke.mjs`.
-- [~] **S2a — prototip Bomberman complet** → `scratch/bomberman-proto.html`
-      Standalone jucabil: dușmani cu AI urmărire, bombe plasabile + explozii în lanț, blocuri
-      distructibile, pericole, vieți + game-over + respawn fără pierderea progresului puzzle,
-      plasare ALEATOARE cufere/uși/blocuri. Păstrează `openPuzzle` pe uși roșii + cufăr auriu = scăpare.
-- [~] **S2b — prototip hartă overworld** → `scratch/overworld-proto.html`
-      Personaj top-down care intră pe ușă → încarcă camera → revine pe hartă. Înlocuiește coridorul
-      static. Respectă contractul campaniei: iframe per cameră, `parent.nextRoom`/`roomReady`.
+- [x] **S2a — prototip Bomberman complet** → `scratch/bomberman-proto.html` (GATA, 8/8 verificat de mine)
+      Grid 15×13, bombe timer 2.4s + explozii lanț, cutii distructibile, AI dușmani BFS urmărire,
+      3 vieți + respawn cu progres puzzle PĂSTRAT (stare separată), PRNG seedat (`window.__seed`),
+      uși roșii `openPuzzle(id,cb)` + cufăr = scăpare. Hooks `window.__game`.
+      Test: `scratch/verify-bomberman.mjs` (+ `pw-bomberman.config.mjs`). Am corectat testul AI:
+      dușmanii merg DOAR pe podea → cei închiși în cutii nu se mișcă (corect); testul curăță cutiile.
+      Note S3: dușmanii confinați de cutii e intenționat — la integrare asigură căi sau acceptă.
+- [x] **S2b — prototip hartă overworld** → `scratch/overworld-proto.html` (GATA, 7/7 verificat de mine)
+      Hartă tile 20×18, player top-down (săgeți/WASD/dpad), 4 uși + exit deblocat după toate.
+      Orchestrator identic cu `gameCampaign`: `mountRoom`/`roomReady`/`nextRoom`/`roomError`/timeout 4s,
+      resume localStorage, idempotență. Hooks test `window.__map`. Test: `scratch/test-overworld.mjs`.
+      Note S3: stub `makeSrcdoc` → `TPL[style].replace('__CFG__', fn)`; DOOR_TILES paralel cu puzzles;
+      backslash dublu la portare. Ordine rezolvare LIBERĂ.
 - [x] **S2c — `STYLES.md`** — direcție restyle pentru cele 5 stiluri (GATA, 775 linii).
       Top 3 impact/efort: terminal `.line.dim` fix WCAG (3.1:1→6.1:1); classic card glow +
       progres bar; chat header `backdrop-filter` + bulă NPC distinctă. Consumat de S3.
