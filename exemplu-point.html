@@ -6,21 +6,23 @@
 <title>Comoara ascunsa</title>
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; background: #0d0820; color: #fff; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; align-items: center; }
-  h1 { font-size: 19px; margin: 14px 0 4px; }
-  #hud { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #b9aee0; margin-bottom: 4px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }
+  body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #0a0618 0%, #150d30 100%); color: #fff; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; align-items: center; }
+  h1 { font-size: 20px; margin: 14px 0 4px; color: #e8deff; letter-spacing: .04em; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+  #hud { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #d4c8f8; margin-bottom: 4px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }
   #hudLetters { display: flex; gap: 4px; }
-  #hudLetters span { width: 22px; height: 26px; border-radius: 5px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,.4); font-size: 13px; }
-  #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; }
-  .note { font-size: 13px; color: #8d80bb; margin: 2px 0 10px; text-align: center; padding: 0 12px; min-height: 18px; }
+  #hudLetters span { width: 26px; height: 30px; border-radius: 6px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,.4); font-size: 13px; }
+  #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 0 10px var(--accent); }
+  .note { font-size: 13px; color: #a89fd4; margin: 2px 0 10px; text-align: center; padding: 0 12px; min-height: 18px; }
   #stage { width: 100%; max-width: 860px; padding: 0 10px 20px; }
   svg { width: 100%; height: auto; border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.5); display: block; }
   .hot { cursor: pointer; }
-  .hot:hover { filter: brightness(1.35) drop-shadow(0 0 6px rgba(255,255,255,.35)); }
-  .hot.done { opacity: .6; cursor: default; }
+  .hot:hover { filter: brightness(1.5) drop-shadow(0 0 8px rgba(255,220,100,.5)); transition: filter .15s; }
+  .hot.done { opacity: .85; cursor: default; }
   .hot.done:hover { filter: none; }
   #door { cursor: pointer; }
-  #door.open { filter: drop-shadow(0 0 12px #22c55e); }
+  #door.open { filter: drop-shadow(0 0 18px rgba(34,197,94,.5)) drop-shadow(0 0 6px #fff); animation: door-glow 2s ease-in-out infinite alternate; }
+  @keyframes door-glow { from { filter: drop-shadow(0 0 12px rgba(34,197,94,.5)); } to { filter: drop-shadow(0 0 24px rgba(34,197,94,.5)) drop-shadow(0 0 8px rgba(255,255,255,.3)); } }
+  @media (prefers-reduced-motion: reduce) { .hot { transition: none; } #door.open { animation: none; filter: drop-shadow(0 0 18px rgba(34,197,94,.5)); } }
 
   .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }
   @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }

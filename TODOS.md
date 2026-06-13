@@ -39,7 +39,7 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
 - [x] **S2c — `STYLES.md`** — direcție restyle pentru cele 5 stiluri (GATA, 775 linii).
       Top 3 impact/efort: terminal `.line.dim` fix WCAG (3.1:1→6.1:1); classic card glow +
       progres bar; chat header `backdrop-filter` + bulă NPC distinctă. Consumat de S3.
-- [~] **S3 — integrare în `escape-builder.html`** *(secvențial: Bomberman → Overworld → restyle; smoke după fiecare)*
+- [x] **S3 — integrare în `escape-builder.html`** *(GATA — toate 3 pas-urile; smoke 21/21)*
       Portează prototipurile (template literals → DUBLEAZĂ backslash-urile) + regenerează demo-urile.
       Pas 1: Bomberman → `gameArcade`. Pas 2: Overworld → `gameCampaign`. Pas 3: restyle 5 stiluri.
       - [x] Pas 1 — Bomberman în `gameArcade` (GATA). Păstrează `openPuzzle`/`onDoorSolved`/`showFinal`/
@@ -49,7 +49,11 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
         coridorul; intro→`showOverworld(0)`, nextRoom/skip/resume→`showOverworld`. Contractul
         (mountRoom/nextRoom/roomReady/roomError/timeout/finale) NESCHIMBAT. Cod coridor șters.
         Cele 8 teste campanie rescrise (`enterRoom`/`waitOverworld`/`__ow`). Smoke 21/21 + captură.
-      - [ ] Pas 3 — restyle 5 stiluri (din `STYLES.md`).
+      - [x] Pas 3 — restyle 5 stiluri din `STYLES.md` (GATA, toate 5). Classic spotlight+card glow+
+        tile 44px; Terminal fix WCAG `.dim` #2ecc71 + bordură CRT + flicker; Arcade canvas neon +
+        dpad fizic; Chat header frosted + bule distincte + tile reward; Point fundal distinct +
+        fix contrast `.note` + ușă glow. `prefers-reduced-motion` peste tot. Toate 5 demo-uri
+        regenerate. Smoke 21/21 + capturi pe fiecare stil.
 - [!] **S4 — extinde `tests/smoke.mjs`** *(blocat de S3)* — bomberman, hartă, audio, regresie.
 
 **Stare la 2026-06-13:** PR1 livrat (`a42c960`, suita 21/21). Iterația 2 = neîncepută;
