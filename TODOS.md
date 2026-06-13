@@ -18,7 +18,7 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
 - [x] **Audit a11y motoare** — LIVRAT (vezi §dedicată mai jos). Smoke 26/26.
 
 **PR2 livrat (2026-06-13):** audio camere `651025b`, voce `da93d84`, unificare `ab11089`, a11y (acest commit).
-Rămas din Etapa 2: muzică timer (T10) + Adventure Mode v0. (D7 + Timer Calm LIVRATE — vezi §§ mai jos.)
+Rămas din Etapa 2: Adventure Mode v0 (+ Diplomă §Design pct.9). (D7 + Timer Calm + Muzică T10 LIVRATE.)
 
 ### [x] Bomberman polish (feedback user 2026-06-13) — LIVRAT
 Trei probleme raportate + o lipsă, toate în `gameArcade` (`escape-builder.html`):
@@ -106,12 +106,20 @@ safe by default. `exemplu-campanie.html` regenerat (rămâne fără timer — op
 smoke 29/29 (test nou „timer calm": format M:SS, prag auriu, freeze la expirare, jocul continuă, resume
 păstrează ceasul). Commit: (acest commit). Următorul: muzică T10 (accelerare sub 1 min — depinde de timer).
 
-### Muzică accelerată la timer (PR2 / T10) — depinde de Timer Calm (LIVRAT)
-- Audio ambient în campanie: track calm → accelerare progresivă sub 1 minut.
-- Ownership: părintele deține AudioContext; camerele nu știu de muzică.
-- Fallback: zero pedeapsă dacă AudioContext lipsă (webview restricitve).
-- Edge: muzica se oprește la `speechSynthesis.cancel()` dacă vocea e activă simultan.
-- Legat de: T10 (PR2), timer countdown în bara chrome (§Design pct. 10).
+### [x] Muzică ambient accelerată la timer (PR2 / T10) — LIVRAT (2026-06-13)
+Opt-in din builder (checkbox `music`, default off). Orchestrator-only: părintele deține AudioContext
+(reutilizează `beep._ctx`, deblocat de gestul global); camerele NU știu de muzică. Arpegiu calm pe
+pentatonică minoră (`_mTick`, oscilatoare sine scurte la ~520ms); tempo **accelerează** spre ~1.8×
+pe ultimul minut (`musicTempoFactor`, legat de `_deadline`-ul Timer Calm). Buton 🎵/🔇 în bara chrome
+(`#btn-music`). Edge-uri tratate:
+- **Duck pe voce:** `voiceSay` setează `u.onstart→duckMusic(true)` / `onend|onerror→duckMusic(false)`;
+  `voiceCancel` și el unduck. Vocea are prioritate (gain muzică × 0.22 cât timp vorbește).
+- **Fallback fără AudioContext:** tot în `try/catch` → no-op, buton ascuns (zero penalizare).
+- pornește la „Începe aventura" + la resume; se oprește la `showFinale` (+ toggle).
+- fără timer → tempo rămâne 1.0 (loop calm, fără accelerare).
+Hook test `window.__music` (`tempo()`, `state()`). `exemplu-campanie.html` regenerat (rămâne fără
+muzică — opt-in, ca vocea). Verificat: smoke 30/30 (test nou „muzica ambient": opt-in, start, tempo
+crește sub 1 min, duck, toggle). Următorul roadmap: Diplomă (§Design pct.9) + Adventure Mode v0.
 
 ### [x] Narațiune vocală (SpeechSynthesis, D10) — LIVRAT (PR2)
 Feature NOU (nu doar edge-cases — voce nu exista deloc). Opt-in din builder (checkbox

@@ -739,6 +739,58 @@ test.describe('Campanie E2E @campanie', () => {
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  test('muzica ambient — opt-in, porneste la start, tempo accelereaza sub 1 min, duck pe voce, toggle (T10)',
+    async ({ page }) => {
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(3, 'classic');
+      cfg.music = true;
+      cfg.timerMin = 1; /* timer pornit → tempo poate accelera */
+      const tmpPath = await writeCampaignHtml(page, cfg, 'music');
+      const gp = await page.context().newPage();
+
+      try {
+        await gp.goto('file://' + tmpPath);
+
+        // Butonul de muzica vizibil (opt-in activ); muzica inca neporita
+        await expect(gp.locator('#btn-music')).toBeVisible();
+        expect(await gp.evaluate(() => window.__music.state().playing), 'inca neporita pe intro').toBe(false);
+
+        await gp.locator('#btn-start').click();
+
+        // Dupa start: muzica ruleaza, buton apasat
+        await gp.waitForFunction(() => window.__music.state().playing === true, null, { timeout: 4000 });
+        await expect(gp.locator('#btn-music')).toHaveAttribute('aria-pressed', 'true');
+
+        // Tempo: 1.0 cand >60s ramase; creste progresiv sub 1 min (citit determinist)
+        const tempos = await gp.evaluate(() => {
+          const f = window.__music.tempo;
+          _deadline = Date.now() + 90000; const t90 = f();
+          _deadline = Date.now() + 30000; const t30 = f();
+          _deadline = Date.now() + 1000;  const t1  = f();
+          return { t90, t30, t1 };
+        });
+        expect(tempos.t90).toBeCloseTo(1, 1);
+        expect(tempos.t30, 'accelereaza sub 1 min').toBeGreaterThan(tempos.t90);
+        expect(tempos.t1,  'mai rapid spre expirare').toBeGreaterThan(tempos.t30);
+
+        // Duck: vocea are prioritate → atenueaza muzica
+        const ducked   = await gp.evaluate(() => { duckMusic(true);  return window.__music.state().duck; });
+        const unducked = await gp.evaluate(() => { duckMusic(false); return window.__music.state().duck; });
+        expect(ducked, 'duck activ < 1').toBeLessThan(1);
+        expect(unducked, 'duck dezactivat = 1').toBe(1);
+
+        // Toggle off din buton → se opreste
+        await gp.locator('#btn-music').click();
+        await expect(gp.locator('#btn-music')).toHaveAttribute('aria-pressed', 'false');
+        expect(await gp.evaluate(() => window.__music.state().playing), 'oprit dupa toggle').toBe(false);
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
   // ─────────────────────────────────────────────────────────────────────
   // Test 3: Camera moartă — timeout 4s → skip-banner + cod eroare
   // ─────────────────────────────────────────────────────────────────────

@@ -135,6 +135,7 @@
       <label>Mesajul final (la castig)</label>
       <textarea id="gFinal" data-g="finalMessage" rows="2"></textarea>
       <label class="ck"><input type="checkbox" id="gVoice" data-gb="voice"> Naratiune vocala &mdash; citeste povestea si intrebarile cu vocea sistemului (doar in Campanie multi-stil)</label>
+      <label class="ck"><input type="checkbox" id="gMusic" data-gb="music"> Muzica de fundal &mdash; arpegiu calm care accelereaza sub 1 minut (doar in Campanie; buton de oprire in bara)</label>
       <label>Timp limita (minute, 0 = fara) &mdash; ceas calm in bara, doar in Campanie</label>
       <input type="number" id="gTimer" data-g="timerMin" min="0" max="120" step="1" placeholder="0">
       <div class="help">Pornesti la "Incepe aventura". Sub 1 minut devine auriu. La expirare ingheata pe 0:00 &mdash; jocul continua, fara penalizare.</div>
@@ -179,6 +180,7 @@ const defaultState = () => ({
   style: 'classic',
   charName: 'Alex',
   voice: false,
+  music: false,
   timerMin: 0,
   story: 'O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari. Rezolva fiecare puzzle ca sa aduni literele cuvantului magic.',
   finalMessage: 'Felicitari! Ai gasit comoara!',
@@ -1634,15 +1636,15 @@ body {
 #chrome-timer[hidden] { display: none; }
 #chrome-timer.low { color: var(--c-gold); }
 #chrome-timer.expired { color: var(--c-gold); opacity: .55; }
-#btn-voice {
+#btn-voice, #btn-music {
   width: 34px; height: 34px; min-width: 34px; padding: 0; border: 0; cursor: pointer;
   border-radius: 8px; background: rgba(255,255,255,.12); color: #fff;
   font-size: 17px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
 }
-#btn-voice[hidden] { display: none; } /* id batea specificitatea UA [hidden] */
-#btn-voice:hover { background: rgba(255,255,255,.22); }
-#btn-voice[aria-pressed="false"] { opacity: .5; }
-#btn-voice:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+#btn-voice[hidden], #btn-music[hidden] { display: none; } /* id batea specificitatea UA [hidden] */
+#btn-voice:hover, #btn-music:hover { background: rgba(255,255,255,.22); }
+#btn-voice[aria-pressed="false"], #btn-music[aria-pressed="false"] { opacity: .5; }
+#btn-voice:focus-visible, #btn-music:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
 #dots { display: flex; gap: 8px; }
 #dots span {
   width: 10px; height: 10px; border-radius: 50%;
@@ -1812,6 +1814,7 @@ body {
   <span id="chrome-title">${esc(cfg.title)}</span>
   <div class="sp"></div>
   <span id="chrome-timer" role="timer" aria-label="Timp ramas" hidden>0:00</span>
+  <button id="btn-music" type="button" aria-label="Muzica de fundal" hidden>&#127925;</button>
   <button id="btn-voice" type="button" aria-label="Naratiune vocala" hidden>&#128266;</button>
   <div id="dots" role="group" aria-label="Progres camere"></div>
 </div>
@@ -1931,6 +1934,56 @@ function startTimer(){
   if(!_timerInt && !_timerExpired) _timerInt = setInterval(tickTimer, 1000);
 }
 
+/* ----- Muzică ambient (T10) — opt-in MASTER.music. Orchestrator-only: părintele
+   deține AudioContext (reutilizează beep._ctx, deblocat de gestul global); camerele
+   nu știu de muzică. Arpegiu calm pe pentatonică minoră; tempo ACCELEREAZĂ sub 1 min
+   (legat de Timer Calm). Se atenuează (duck) cât timp vocea vorbește. Fallback:
+   fără AudioContext → no-op, butonul rămâne ascuns (zero penalizare). ----- */
+var MUSIC    = !!MASTER.music;
+var musicOn  = MUSIC;
+var _mGain = null, _mTimer = null, _mStep = 0, _mDuck = 1;
+var _MSCALE = [0, 3, 5, 7, 10]; /* pentatonică minoră (semitonuri) */
+function _mFreq(semi){ return 220 * Math.pow(2, semi / 12); }
+function musicTempoFactor(){
+  /* 1.0 normal → ~1.8 pe ultimul minut (accelerare progresivă) */
+  if(TIMER_SEC <= 0 || !_deadline) return 1;
+  var rem = (_deadline - Date.now()) / 1000;
+  if(rem < 0) return 1.8;
+  if(rem > 60) return 1;
+  return 1 + (1 - rem / 60) * 0.8;
+}
+function _mTick(){
+  if(!musicOn || !_mGain){ _mTimer = null; return; }
+  var ctx = beep._ctx;
+  if(ctx){
+    try{
+      var oct = (Math.floor(_mStep / _MSCALE.length) % 2) ? 12 : 0;
+      var semi = _MSCALE[_mStep % _MSCALE.length] + oct;
+      var o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
+      o.type = 'sine'; o.frequency.value = _mFreq(semi);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05 * _mDuck, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+      o.connect(g); g.connect(_mGain);
+      o.start(t); o.stop(t + 0.6);
+    }catch(e){}
+  }
+  _mStep++;
+  _mTimer = setTimeout(_mTick, 520 / musicTempoFactor()); /* mai rapid când tempo crește */
+}
+function startMusic(){
+  if(!musicOn) return;
+  try{
+    var ctx = beep._ctx || (beep._ctx = new (window.AudioContext || window.webkitAudioContext)());
+    if(ctx.state === 'suspended') ctx.resume();
+    if(!_mGain){ _mGain = ctx.createGain(); _mGain.gain.value = 1; _mGain.connect(ctx.destination); }
+    if(!_mTimer){ _mStep = 0; _mTick(); }
+  }catch(e){}
+}
+function stopMusic(){ if(_mTimer){ clearTimeout(_mTimer); _mTimer = null; } }
+function duckMusic(on){ _mDuck = on ? 0.22 : 1; } /* vocea are prioritate (edge T10) */
+window.__music = { tempo: musicTempoFactor, state: function(){ return { on: musicOn, playing: !!_mTimer, duck: _mDuck }; } };
+
 var frameEl     = document.getElementById('room-frame');
 var introEl     = document.getElementById('intro');
 var skipEl      = document.getElementById('skip-banner');
@@ -2025,7 +2078,7 @@ if(SPEECH){
   _pickVoice();
   try{ window.speechSynthesis.onvoiceschanged = _pickVoice; }catch(e){}
 }
-function voiceCancel(){ if(SPEECH){ try{ window.speechSynthesis.cancel(); }catch(e){} } }
+function voiceCancel(){ if(SPEECH){ try{ window.speechSynthesis.cancel(); }catch(e){} } duckMusic(false); }
 function voiceSay(text){
   if(!SPEECH || !voiceOn || !text) return;
   try{
@@ -2034,6 +2087,10 @@ function voiceSay(text){
     var u = new SpeechSynthesisUtterance(String(text));
     if(_roVoice){ u.voice = _roVoice; u.lang = _roVoice.lang; } else { u.lang = 'ro-RO'; }
     u.rate = 1; u.pitch = 1;
+    /* vocea are prioritate → atenuează muzica cât timp vorbește (edge T10) */
+    u.onstart = function(){ duckMusic(true); };
+    u.onend   = function(){ duckMusic(false); };
+    u.onerror = function(){ duckMusic(false); };
     window.speechSynthesis.speak(u);
   }catch(e){}
 }
@@ -2158,7 +2215,7 @@ function showSkipBanner(idx, code, reason){
 
 /* ----- Final ----- */
 function showFinale(){
-  stopTimer(); /* jocul s-a încheiat — oprește ceasul */
+  stopTimer(); stopMusic(); /* jocul s-a încheiat — oprește ceasul + muzica */
   hideAll(); finaleEl.classList.add('show');
   var wEl = document.getElementById('fin-word'); wEl.innerHTML = '';
   collected.forEach(function(l,j){
@@ -2328,6 +2385,7 @@ document.getElementById('btn-start').onclick = function(){
   unlockAudio(); /* gest direct pe părinte (handlerul global prinde și el, dar e idempotent) */
   clearProgress(); owResetPlayer(); showOverworld(0);
   startTimer(); /* ceasul pornește exact la „Începe aventura" (intro necronometrat) */
+  startMusic(); /* muzica ambient pornește odată cu aventura (T10) */
   voiceSay(_introStory); /* după showOverworld → hideAll a rulat deja, nu mai anulează (D10) */
 };
 
@@ -2345,6 +2403,23 @@ if(SPEECH && btnVoice){
     voiceOn = !voiceOn;
     if(!voiceOn) voiceCancel();
     _syncVoiceBtn();
+  };
+}
+
+/* ----- Buton muzică în bara chrome (T10) ----- */
+var btnMusic = document.getElementById('btn-music');
+if(MUSIC && btnMusic){
+  btnMusic.hidden = false;
+  var _syncMusicBtn = function(){
+    btnMusic.innerHTML = musicOn ? '&#127925;' : '&#128263;'; /* 🎵 / 🔇 */
+    btnMusic.setAttribute('aria-pressed', musicOn ? 'true' : 'false');
+    btnMusic.title = musicOn ? 'Muzica pornita — apasa ca sa opresti' : 'Muzica oprita — apasa ca sa pornesti';
+  };
+  _syncMusicBtn();
+  btnMusic.onclick = function(){
+    musicOn = !musicOn;
+    if(musicOn) startMusic(); else stopMusic();
+    _syncMusicBtn();
   };
 }
 
@@ -2370,6 +2445,7 @@ buildDots();
   }
   owResetPlayer(); showOverworld(resumeIdx);
   startTimer(); /* resume → reia ceasul de la deadline-ul absolut salvat */
+  startMusic(); /* resume → reia muzica (T10) */
 })();
 <\/script>
 </body>
