@@ -449,8 +449,8 @@ function gameHTML(cfg) {
 }
 
 function gameClassic(cfg) {
-  /* cfg === '__TEMPLATE__' → emit sentinel __CFG__ în loc de JSON (D1) */
-  const json = (cfg === '__TEMPLATE__') ? '__CFG__' : JSON.stringify(cfg).replace(/</g, '\\u003c');
+  /* CFG + helperii partajați (norm/beep/confetti/checkAnswer/starsFor/finalWord/
+     choiceOpts/campaignDone/roomReady/onerror) vin din libJS(cfg) injectat în <script> (D7) */
   return `<!doctype html>
 <html lang="ro">
 <head>
@@ -556,17 +556,12 @@ function gameClassic(cfg) {
 </div>
 
 <script>
-var CFG = ${json};
-document.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');
+${libJS(cfg)}
 document.documentElement.style.setProperty('--accent-light', 'color-mix(in srgb, ' + (CFG.color || '#6d28d9') + ' 40%, white)');
 
-var idx = 0, totalStars = 0, attempts = 0, hintUsed = false, won = [];
-
-function el(id) { return document.getElementById(id); }
-function norm(s) {
-  return String(s).trim().toLowerCase().normalize('NFD')
-    .replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.');
-}
+var idx = 0, attempts = 0, hintUsed = false, won = [];
+/* CFG, totalStars, el, norm, beep, confetti, starsFor, finalWord, checkAnswer,
+   choiceOpts, campaignDone, roomReady, window.onerror — toate din libJS (D7) */
 function show(id) {
   var scr = document.querySelectorAll('.screen');
   for (var i = 0; i < scr.length; i++) scr[i].classList.remove('on');
@@ -617,7 +612,7 @@ function renderPuzzle() {
     inp.type = 'text'; inp.autocomplete = 'off'; inp.placeholder = 'Scrie raspunsul...';
     var btn = document.createElement('button');
     btn.textContent = 'Verifica';
-    btn.onclick = function () { check(inp.value, p.answer); };
+    btn.onclick = function () { check(p, inp.value); };
     inp.onkeydown = function (e) { if (e.key === 'Enter') btn.click(); };
     box.appendChild(inp); box.appendChild(btn);
     setTimeout(function () { inp.focus(); }, 50);
@@ -625,20 +620,17 @@ function renderPuzzle() {
     ['Adevarat', 'Fals'].forEach(function (v) {
       var b = document.createElement('button');
       b.className = 'opt'; b.textContent = v;
-      b.onclick = function () { check(v, p.tfAnswer); };
+      b.onclick = function () { check(p, v); };
       box.appendChild(b);
     });
   } else {
-    var correct = '';
-    var opts = (p.choices || '').split('\\n').map(function (l) { return l.trim(); }).filter(Boolean);
-    opts.forEach(function (o) { if (o.charAt(0) === '*') correct = o.slice(1).trim(); });
-    opts.map(function (o) { return o.charAt(0) === '*' ? o.slice(1).trim() : o; })
-      .forEach(function (o) {
-        var b = document.createElement('button');
-        b.className = 'opt'; b.textContent = o;
-        b.onclick = function () { check(o, correct); };
-        box.appendChild(b);
-      });
+    var opts = choiceOpts(p);
+    opts.forEach(function (o) {
+      var b = document.createElement('button');
+      b.className = 'opt'; b.textContent = o;
+      b.onclick = function () { check(p, o); };
+      box.appendChild(b);
+    });
     if (!opts.length) box.textContent = '(puzzle fara variante - completeaza-le in builder)';
   }
 }
@@ -648,9 +640,9 @@ el('btnHint').onclick = function () {
   el('hinttext').style.display = 'block';
 };
 
-function check(given, expected) {
-  if (norm(given) === norm(expected) && norm(given) !== '') {
-    var stars = (hintUsed || attempts >= 2) ? 1 : (attempts === 1 ? 2 : 3);
+function check(p, given) {
+  if (checkAnswer(p, given)) {
+    var stars = starsFor(attempts, hintUsed);
     totalStars += stars;
     won[idx] = true;
     beep(true);
@@ -676,19 +668,11 @@ function check(given, expected) {
 function next() {
   idx++;
   if (idx < CFG.puzzles.length) { renderPuzzle(); return; }
-  if(CFG._campaign){
-    var L = ''; for(var ci=0;ci<CFG.puzzles.length;ci++){var lc=(CFG.puzzles[ci].letter||'').trim();if(lc)L+=lc.toUpperCase();}
-    try{ parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:L.charAt(0)}); }catch(e){}
-    return;
-  }
+  if(CFG._campaign){ campaignDone(); return; }
   show('sFinal');
   var max = CFG.puzzles.length * 3;
   el('finalStars').textContent = totalStars + ' / ' + max + ' \\u2605';
-  var word = '';
-  for (var i = 0; i < CFG.puzzles.length; i++) {
-    var L = (CFG.puzzles[i].letter || '').trim();
-    if (L) word += L.toUpperCase();
-  }
+  var word = finalWord();
   var bw = el('bigword');
   bw.innerHTML = '';
   for (var j = 0; j < word.length; j++) {
@@ -702,37 +686,7 @@ function next() {
   confetti();
 }
 
-function confetti() {
-  var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6'];
-  for (var i = 0; i < 90; i++) {
-    var c = document.createElement('div');
-    c.className = 'confetti';
-    c.style.left = (i * 137 % 100) + 'vw';
-    c.style.background = colors[i % colors.length];
-    c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's';
-    c.style.animationDelay = ((i * 31 % 14) / 10) + 's';
-    document.body.appendChild(c);
-  }
-}
-
-function beep(ok) {
-  if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; }
-  try {
-    var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)());
-    var t = ctx.currentTime;
-    var freqs = ok ? [523, 784] : [196];
-    freqs.forEach(function (f, k) {
-      var o = ctx.createOscillator(), g = ctx.createGain();
-      o.frequency.value = f; o.type = 'triangle';
-      g.gain.setValueAtTime(0.12, t + k * 0.09);
-      g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25);
-      o.connect(g); g.connect(ctx.destination);
-      o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3);
-    });
-  } catch (e) {}
-}
-window.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };
-if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} }
+roomReady(); /* beep/confetti/onerror/roomReady din libJS (D7) */
 <\/script>
 </body>
 </html>`;
