@@ -39,8 +39,14 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
 - [x] **S2c — `STYLES.md`** — direcție restyle pentru cele 5 stiluri (GATA, 775 linii).
       Top 3 impact/efort: terminal `.line.dim` fix WCAG (3.1:1→6.1:1); classic card glow +
       progres bar; chat header `backdrop-filter` + bulă NPC distinctă. Consumat de S3.
-- [!] **S3 — integrare în `escape-builder.html`** *(blocat de S2a+S2b+S2c)*
+- [~] **S3 — integrare în `escape-builder.html`** *(secvențial: Bomberman → Overworld → restyle; smoke după fiecare)*
       Portează prototipurile (template literals → DUBLEAZĂ backslash-urile) + regenerează demo-urile.
+      Pas 1: Bomberman → `gameArcade`. Pas 2: Overworld → `gameCampaign`. Pas 3: restyle 5 stiluri.
+      - [x] Pas 1 — Bomberman în `gameArcade` (GATA). Păstrează `openPuzzle`/`onDoorSolved`/`showFinal`/
+        `modalOpen()`/`roomReady`; uși=N puzzle-uri, cufăr=scăpare. Demo regenerat. Smoke 21/21 +
+        verificare gameplay 6/6 (`scratch/verify-arcade-integrated.mjs`) + captură.
+      - [ ] Pas 2 — Overworld în `gameCampaign`.
+      - [ ] Pas 3 — restyle 5 stiluri (din `STYLES.md`).
 - [!] **S4 — extinde `tests/smoke.mjs`** *(blocat de S3)* — bomberman, hartă, audio, regresie.
 
 **Stare la 2026-06-13:** PR1 livrat (`a42c960`, suita 21/21). Iterația 2 = neîncepută;

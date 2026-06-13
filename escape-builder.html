@@ -1010,11 +1010,16 @@ function gameArcade(cfg) {
   #hudLetters { display: flex; gap: 4px; }
   #hudLetters span { width: 22px; height: 26px; border-radius: 5px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,.4); font-size: 13px; }
   #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; }
-  canvas { border: 3px solid #36246b; border-radius: 8px; background: #18102e; max-width: calc(100vw - 16px); }
+  canvas { border: 3px solid #36246b; border-radius: 8px; background: #18102e; max-width: calc(100vw - 16px); image-rendering: pixelated; }
   .help { font-size: 12px; color: #6f639e; margin: 8px 0 4px; text-align: center; padding: 0 10px; }
-  #dpad { display: flex; gap: 8px; margin: 6px 0 16px; }
+  #dpad { display: flex; gap: 8px; margin: 6px 0 16px; flex-wrap: wrap; justify-content: center; }
   #dpad button { width: 52px; height: 44px; font-size: 18px; border-radius: 9px; border: 1px solid #4a3590; background: #221643; color: #cdc3f0; cursor: pointer; }
   #dpad button:active { background: var(--accent); }
+  #btnBomb { background: #7f1d1d; border-color: #b91c1c; }
+  #goOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.82); z-index: 25; align-items: center; justify-content: center; padding: 16px; }
+  #goCard { background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 24px; text-align: center; max-width: 360px; font-family: system-ui, sans-serif; }
+  #goCard #goMsg { font-size: 20px; margin-bottom: 14px; }
+  #goCard button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 11px 18px; font-weight: 700; background: var(--accent); color: #fff; }
 ${SNIP.baseCss}${SNIP.modalCss}${SNIP.finalCss}
 </style>
 </head>
@@ -1022,115 +1027,237 @@ ${SNIP.baseCss}${SNIP.modalCss}${SNIP.finalCss}
 <h1>${esc(cfg.title)}</h1>
 <div id="hud"><span id="hudStep"></span><span id="hudStars"></span><div id="hudLetters"></div></div>
 <canvas id="cv"></canvas>
-<div class="help">Sageti / WASD (da click pe joc intai). Usile rosii iti pun intrebari; cufarul auriu e scaparea.</div>
-<div id="dpad"><button data-d="L">&#9664;</button><button data-d="U">&#9650;</button><button data-d="D">&#9660;</button><button data-d="R">&#9654;</button></div>
+<div class="help">Sageti / WASD = misca, Space sau &#128163; = bomba. Sparge cutiile, evita dusmanii. Usile rosii = intrebari; cufarul auriu = scaparea.</div>
+<div id="dpad"><button data-d="L">&#9664;</button><button data-d="U">&#9650;</button><button data-d="D">&#9660;</button><button data-d="R">&#9654;</button><button id="btnBomb">&#128163;</button></div>
+<div id="goOverlay"><div id="goCard"><div id="goMsg"></div><button id="goRestart">Incearca din nou</button></div></div>
 ${SNIP.modalHtml}
 ${SNIP.finalHtml}
 <script>
 ${libJS(cfg)}
 var N = CFG.puzzles.length;
-var GW = 13, RH = 4, ROOMS = N + 1, GH = ROOMS * RH + 1;
-var TS = 38, VR = Math.min(GH, 11);
-var map = [], doorAt = {}, doorPos = [], solvedFlags = [];
-for (var y = 0; y < GH; y++) {
-  map[y] = [];
-  for (var x = 0; x < GW; x++) {
-    map[y][x] = (x === 0 || x === GW - 1 || y === 0 || y === GH - 1 || y % RH === 0) ? 1 : 0;
-  }
-}
-for (var i = 0; i < N; i++) {
-  var dy = (i + 1) * RH, dx = (i % 2 === 0) ? GW - 3 : 2;
-  map[dy][dx] = 2; doorAt[dy + '_' + dx] = i; doorPos.push({ y: dy, x: dx });
-}
-var chest = { y: (ROOMS - 1) * RH + 2, x: Math.floor(GW / 2) };
-map[chest.y][chest.x] = 4;
-var hero = { y: 2, x: Math.floor(GW / 2) - 2 };
-var finished = false;
 
-var cv = el('cv'); cv.width = GW * TS; cv.height = VR * TS;
+/* ===== Bomberman (S3 — port din scratch/bomberman-proto.html) =====
+   Păstrează contractul motorului: openPuzzle/onDoorSolved/showFinal/modalOpen/roomReady. */
+var __seed = (typeof window.__seed === 'number') ? window.__seed : (Date.now() % 0xFFFFFF);
+window.__seed = __seed;
+function makePRNG(seed){ var s = seed >>> 0; return function(){ s |= 0; s = (s + 0x6d2b79f5) | 0; var t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+var rng = makePRNG(__seed);
+
+var GW = 15, GH = 13, TS = 36;
+var T_FLOOR = 0, T_WALL = 1, T_BOX = 2, T_DOOR = 3, T_CHEST = 4;
+var BOMB_TIMER = 2400, EXPLOSION_TIME = 500, EXPLOSION_RANGE = 3, ENEMY_INTERVAL = 600, RESPAWN_DELAY = 1500, INVINCIBLE_TIME = 2000, MAX_LIVES = 3;
+var NUM_DOORS = N, NUM_ENEMIES = Math.max(2, Math.min(4, N + 1));
+
+var map, player, enemies, bombs, explosions, lives, gameOver, gameWon, puzzleProgress, doorMeta, chestPos;
+var animFrame, lastTime = 0, enemyTimer = 0, invincibleTimer = 0, bombIdCounter = 0;
+
+var cv = el('cv'); cv.width = GW * TS; cv.height = GH * TS;
 var ctx = cv.getContext('2d');
 
-function draw(){
-  var offY = Math.max(0, Math.min(hero.y - Math.floor(VR / 2), GH - VR));
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  for (var vy = 0; vy < VR; vy++) {
-    var y = vy + offY;
-    for (var x = 0; x < GW; x++) {
-      var t = map[y][x], px = x * TS, py = vy * TS;
-      if (t === 1) {
-        ctx.fillStyle = '#33215f'; ctx.fillRect(px, py, TS, TS);
-        ctx.fillStyle = '#241646';
-        ctx.fillRect(px, py + TS / 2 - 1, TS, 2);
-        ctx.fillRect(px + ((y % 2) ? TS / 2 : TS / 4) - 1, py, 2, TS / 2 - 1);
-      } else {
-        ctx.fillStyle = ((x + y) % 2) ? '#191130' : '#1c1336'; ctx.fillRect(px, py, TS, TS);
-        if (t === 2 || t === 3) {
-          ctx.fillStyle = t === 2 ? '#9f1239' : '#166534'; ctx.fillRect(px + 3, py + 2, TS - 6, TS - 4);
-          ctx.fillStyle = t === 2 ? '#e11d48' : '#22c55e'; ctx.fillRect(px + 6, py + 5, TS - 12, TS - 10);
-          ctx.fillStyle = '#fbbf24'; ctx.fillRect(px + TS / 2 - 2, py + TS / 2 - 2, 4, 7);
-        }
-        if (t === 4) {
-          ctx.fillStyle = '#92400e'; ctx.fillRect(px + 5, py + 10, TS - 10, TS - 16);
-          ctx.fillStyle = '#f59e0b'; ctx.fillRect(px + 5, py + 10, TS - 10, 7);
-          ctx.fillStyle = '#fde68a'; ctx.fillRect(px + TS / 2 - 2, py + 13, 4, 8);
-        }
-      }
-    }
-  }
-  var hx = hero.x * TS, hy = (hero.y - offY) * TS;
-  ctx.fillStyle = CFG.color || '#6d28d9'; ctx.fillRect(hx + 7, hy + 5, TS - 14, TS - 10);
-  ctx.fillStyle = '#fff'; ctx.fillRect(hx + 12, hy + 12, 5, 5); ctx.fillRect(hx + TS - 17, hy + 12, 5, 5);
-  ctx.fillStyle = '#0d0820'; ctx.fillRect(hx + 13, hy + 14, 2, 2); ctx.fillRect(hx + TS - 16, hy + 14, 2, 2);
-  ctx.fillStyle = '#fff'; ctx.fillRect(hx + 13, hy + TS - 14, TS - 26, 3);
+function shuffle(arr){ for (var i = arr.length - 1; i > 0; i--){ var j = Math.floor(rng() * (i + 1)); var t = arr[i]; arr[i] = arr[j]; arr[j] = t; } return arr; }
+
+function buildMap(){
+  map = [];
+  for (var y = 0; y < GH; y++){ map[y] = []; for (var x = 0; x < GW; x++){ if (x === 0 || y === 0 || x === GW - 1 || y === GH - 1) map[y][x] = T_WALL; else if (x % 2 === 0 && y % 2 === 0) map[y][x] = T_WALL; else map[y][x] = T_FLOOR; } }
+  var freeCells = [];
+  for (var fy = 1; fy < GH - 1; fy++) for (var fx = 1; fx < GW - 1; fx++) if (map[fy][fx] === T_FLOOR) freeCells.push({ x: fx, y: fy });
+  var safeZone = [{x:1,y:1},{x:2,y:1},{x:1,y:2}];
+  function isSafe(c){ for (var i = 0; i < safeZone.length; i++) if (safeZone[i].x === c.x && safeZone[i].y === c.y) return true; return false; }
+  var boxCandidates = freeCells.filter(function(c){ return !isSafe(c); });
+  shuffle(boxCandidates);
+  var boxCount = Math.floor(boxCandidates.length * 0.55);
+  for (var b = 0; b < boxCount; b++) map[boxCandidates[b].y][boxCandidates[b].x] = T_BOX;
+  var stillFree = [];
+  for (var sy = 1; sy < GH - 1; sy++) for (var sx = 1; sx < GW - 1; sx++) if (map[sy][sx] === T_FLOOR && !isSafe({x:sx,y:sy})) stillFree.push({ x: sx, y: sy });
+  shuffle(stillFree);
+  doorMeta = [];
+  for (var d = 0; d < NUM_DOORS && d < stillFree.length; d++){ var c = stillFree[d]; map[c.y][c.x] = T_DOOR; doorMeta.push({ x: c.x, y: c.y, id: d }); }
+  var chestCandidates = [];
+  for (var qy = 1; qy < GH - 1; qy++) for (var qx = 1; qx < GW - 1; qx++) if (map[qy][qx] === T_FLOOR && !isSafe({x:qx,y:qy})) chestCandidates.push({ x: qx, y: qy, dist: (GW - 1 - qx) + (GH - 1 - qy) });
+  chestCandidates.sort(function(a,b){ return a.dist - b.dist; });
+  chestPos = chestCandidates.length > 0 ? chestCandidates[0] : { x: GW - 2, y: GH - 2 };
+  map[chestPos.y][chestPos.x] = T_CHEST;
 }
 
+function init(){
+  rng = makePRNG(__seed);
+  buildMap();
+  player = { x: 1, y: 1, alive: true, invincible: false };
+  var ec = [];
+  for (var y = 1; y < GH - 1; y++) for (var x = 1; x < GW - 1; x++) if (map[y][x] === T_FLOOR && (x > 3 || y > 3)) ec.push({ x: x, y: y });
+  shuffle(ec);
+  enemies = [];
+  for (var i = 0; i < NUM_ENEMIES && i < ec.length; i++) enemies.push({ x: ec[i].x, y: ec[i].y, alive: true, id: i });
+  bombs = []; explosions = []; lives = MAX_LIVES; gameOver = false; gameWon = false; enemyTimer = 0; invincibleTimer = 0; lastTime = 0;
+  if (!puzzleProgress) puzzleProgress = { doorsSolved: [] };
+  for (var dd = 0; dd < doorMeta.length; dd++) if (puzzleProgress.doorsSolved[dd]) map[doorMeta[dd].y][doorMeta[dd].x] = T_FLOOR;
+  hideGameOver();
+  updateHud();
+  if (animFrame) cancelAnimationFrame(animFrame);
+  animFrame = requestAnimationFrame(gameLoop);
+}
+
+function respawn(){
+  if (lives <= 0){ showGameOver(); return; }
+  player = { x: 1, y: 1, alive: true, invincible: true };
+  bombs = []; explosions = []; invincibleTimer = INVINCIBLE_TIME; gameOver = false;
+  updateHud();
+}
+
+function showGameOver(){ gameOver = true; el('goMsg').textContent = '\\ud83d\\udc80 Ai ramas fara vieti!'; el('goOverlay').style.display = 'flex'; }
+function hideGameOver(){ el('goOverlay').style.display = 'none'; }
+el('goRestart').onclick = function(){ init(); };
+
+/* ----- HUD (motor: hudStep/hudStars/hudLetters) ----- */
 function updateHud(){
-  var open = 0; for (var i = 0; i < N; i++) if (solvedFlags[i]) open++;
-  el('hudStep').textContent = 'Usi: ' + open + '/' + N;
+  var solved = puzzleProgress ? puzzleProgress.doorsSolved.filter(Boolean).length : 0;
+  var alive = enemies ? enemies.filter(function(e){ return e.alive; }).length : 0;
+  el('hudStep').textContent = '\\u2764\\ufe0f ' + lives + '   \\ud83d\\udc7e ' + alive + '   \\ud83d\\udd13 ' + solved + '/' + N;
   el('hudStars').textContent = totalStars + ' \\u2605';
   var hb = el('hudLetters'); hb.innerHTML = '';
-  for (var j = 0; j < N; j++) {
-    var L = (CFG.puzzles[j].letter || '').trim();
-    if (!L) continue;
-    var s = document.createElement('span');
-    if (solvedFlags[j]) { s.textContent = L.toUpperCase(); s.className = 'won'; }
-    else s.textContent = '?';
-    hb.appendChild(s);
-  }
+  for (var j = 0; j < N; j++){ var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue; var s = document.createElement('span'); if (puzzleProgress && puzzleProgress.doorsSolved[j]){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?'; hb.appendChild(s); }
 }
 
-function move(dx, dy){
-  if (finished || modalOpen()) return;
-  var nx = hero.x + dx, ny = hero.y + dy;
-  if (ny < 0 || ny >= GH || nx < 0 || nx >= GW) return;
+/* ----- Bombe + explozii în lanț ----- */
+function placeBomb(){
+  if (!player.alive || gameOver || gameWon || modalOpen()) return;
+  if (bombs.length >= 1) return;
+  bombs.push({ x: player.x, y: player.y, timer: BOMB_TIMER, id: bombIdCounter++ });
+  updateHud();
+}
+function explodeBomb(bomb){
+  bombs = bombs.filter(function(b){ return b.id !== bomb.id; });
+  var cells = [{ x: bomb.x, y: bomb.y }];
+  var dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  for (var d = 0; d < dirs.length; d++){ var dx = dirs[d][0], dy = dirs[d][1]; for (var r = 1; r <= EXPLOSION_RANGE; r++){ var cx = bomb.x + dx * r, cy = bomb.y + dy * r; if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) break; var t = map[cy][cx]; if (t === T_WALL) break; cells.push({ x: cx, y: cy }); if (t === T_BOX){ map[cy][cx] = T_FLOOR; break; } if (t === T_DOOR || t === T_CHEST) break; } }
+  explosions.push({ cells: cells, endTime: performance.now() + EXPLOSION_TIME });
+  var chain = bombs.slice();
+  for (var i = 0; i < chain.length; i++){ var bb = chain[i]; for (var c = 0; c < cells.length; c++) if (cells[c].x === bb.x && cells[c].y === bb.y){ explodeBomb(bb); break; } }
+  checkExplosionHits(cells);
+  updateHud();
+}
+function checkExplosionHits(cells){
+  for (var c = 0; c < cells.length; c++){ var cx = cells[c].x, cy = cells[c].y; for (var i = 0; i < enemies.length; i++) if (enemies[i].alive && enemies[i].x === cx && enemies[i].y === cy) enemies[i].alive = false; if (player.alive && !player.invincible && player.x === cx && player.y === cy) killPlayer(); }
+}
+function killPlayer(){
+  if (!player.alive) return;
+  player.alive = false; lives--; updateHud();
+  setTimeout(function(){ if (lives > 0) respawn(); else showGameOver(); }, RESPAWN_DELAY);
+}
+
+/* ----- Mișcare jucător + uși (puzzle) / cufăr (scăpare) ----- */
+function movePlayer(dir){
+  if (!player.alive || gameOver || gameWon || modalOpen()) return;
+  var dx = 0, dy = 0;
+  if (dir === 'U') dy = -1; else if (dir === 'D') dy = 1; else if (dir === 'L') dx = -1; else if (dir === 'R') dx = 1;
+  var nx = player.x + dx, ny = player.y + dy;
+  if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) return;
   var t = map[ny][nx];
-  if (t === 1) return;
-  if (t === 2) { openPuzzle(doorAt[ny + '_' + nx], onDoorSolved); return; }
-  if (t === 4) { finished = true; showFinal(); return; }
-  hero.x = nx; hero.y = ny; draw();
+  if (t === T_WALL || t === T_BOX) return;
+  for (var i = 0; i < bombs.length; i++) if (bombs[i].x === nx && bombs[i].y === ny) return;
+  if (t === T_DOOR){ for (var d = 0; d < doorMeta.length; d++) if (doorMeta[d].x === nx && doorMeta[d].y === ny){ if (!puzzleProgress.doorsSolved[d]) openPuzzle(d, onDoorSolved); return; } return; }
+  if (t === T_CHEST){ player.x = nx; player.y = ny; gameWon = true; showFinal(); return; }
+  player.x = nx; player.y = ny;
+  checkPlayerEnemyCollision();
+}
+function onDoorSolved(id){
+  if (!puzzleProgress) puzzleProgress = { doorsSolved: [] };
+  puzzleProgress.doorsSolved[id] = true;
+  if (doorMeta && doorMeta[id]) map[doorMeta[id].y][doorMeta[id].x] = T_FLOOR;
+  updateHud();
 }
 
-function onDoorSolved(i){
-  solvedFlags[i] = true;
-  map[doorPos[i].y][doorPos[i].x] = 3;
-  updateHud(); draw();
+/* ----- AI dușmani: BFS spre jucător (doar pe podea) ----- */
+function moveEnemies(){ if (gameOver || gameWon) return; for (var i = 0; i < enemies.length; i++){ var e = enemies[i]; if (!e.alive) continue; var next = bfsStep(e.x, e.y, player.x, player.y); if (next){ e.x = next.x; e.y = next.y; } } checkPlayerEnemyCollision(); }
+function bfsStep(sx, sy, tx, ty){
+  if (sx === tx && sy === ty) return null;
+  var visited = {}; var queue = [{ x: sx, y: sy, step: null }]; visited[sy + ',' + sx] = true;
+  var dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  while (queue.length > 0){ var cur = queue.shift(); for (var d = 0; d < dirs.length; d++){ var nx = cur.x + dirs[d][0], ny = cur.y + dirs[d][1]; var key = ny + ',' + nx; if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue; if (visited[key]) continue; if (map[ny][nx] !== T_FLOOR) continue; var hb = false; for (var bi = 0; bi < bombs.length; bi++) if (bombs[bi].x === nx && bombs[bi].y === ny){ hb = true; break; } if (hb) continue; var he = false; for (var ei = 0; ei < enemies.length; ei++) if (enemies[ei].alive && enemies[ei].x === nx && enemies[ei].y === ny){ he = true; break; } if (he) continue; visited[key] = true; var step = cur.step || { x: nx, y: ny }; if (nx === tx && ny === ty) return step; queue.push({ x: nx, y: ny, step: step }); } }
+  return null;
+}
+function checkPlayerEnemyCollision(){ if (!player.alive || player.invincible) return; for (var i = 0; i < enemies.length; i++) if (enemies[i].alive && enemies[i].x === player.x && enemies[i].y === player.y){ killPlayer(); return; } }
+
+/* ----- Game loop ----- */
+function gameLoop(now){
+  var dt = now - (lastTime || now); lastTime = now;
+  if (!gameOver && !gameWon){
+    if (player.invincible && invincibleTimer > 0){ invincibleTimer -= dt; if (invincibleTimer <= 0){ player.invincible = false; invincibleTimer = 0; checkPlayerEnemyCollision(); } }
+    var explodeList = [];
+    for (var i = 0; i < bombs.length; i++){ bombs[i].timer -= dt; if (bombs[i].timer <= 0) explodeList.push(bombs[i]); }
+    for (var k = 0; k < explodeList.length; k++) explodeBomb(explodeList[k]);
+    var nowMs = performance.now();
+    explosions = explosions.filter(function(ex){ return ex.endTime > nowMs; });
+    if (!modalOpen() && player.alive){ enemyTimer += dt; if (enemyTimer >= ENEMY_INTERVAL){ enemyTimer = 0; moveEnemies(); } }
+  }
+  draw(now); updateHud();
+  animFrame = requestAnimationFrame(gameLoop);
 }
 
+/* ----- Desenare ----- */
+function draw(now){
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  var expSet = {}; var nowMs = performance.now();
+  for (var ex = 0; ex < explosions.length; ex++) if (explosions[ex].endTime > nowMs){ var cs = explosions[ex].cells; for (var c = 0; c < cs.length; c++) expSet[cs[c].y + ',' + cs[c].x] = true; }
+  for (var y = 0; y < GH; y++) for (var x = 0; x < GW; x++){ var px = x * TS, py = y * TS, t = map[y][x], isExp = expSet[y + ',' + x];
+    if (t === T_WALL) drawWall(px, py, y);
+    else if (t === T_BOX) drawBox(px, py, isExp);
+    else if (t === T_DOOR){ drawFloor(px, py, x, y, isExp); drawDoor(px, py); }
+    else if (t === T_CHEST){ drawFloor(px, py, x, y, isExp); drawChest(px, py); }
+    else drawFloor(px, py, x, y, isExp);
+  }
+  for (var bi = 0; bi < bombs.length; bi++) drawBomb(bombs[bi], now);
+  for (var en = 0; en < enemies.length; en++) if (enemies[en].alive) drawEnemy(enemies[en]);
+  if (player.alive) drawPlayer(now);
+}
+function drawWall(px, py, y){ ctx.fillStyle = '#33215f'; ctx.fillRect(px, py, TS, TS); ctx.fillStyle = '#241646'; ctx.fillRect(px, py + TS/2 - 1, TS, 2); ctx.fillRect(px + ((y%2) ? TS/2 : TS/4) - 1, py, 2, TS/2 - 1); ctx.fillRect(px + ((y%2) ? TS/4 : 3*TS/4) - 1, py + TS/2, 2, TS/2); }
+function drawFloor(px, py, x, y, isExp){ if (isExp){ ctx.fillStyle = '#f97316'; ctx.fillRect(px, py, TS, TS); ctx.fillStyle = '#fef08a'; ctx.fillRect(px + TS/4, py + TS/4, TS/2, TS/2); } else { ctx.fillStyle = ((x + y) % 2) ? '#191130' : '#1c1336'; ctx.fillRect(px, py, TS, TS); } }
+function drawBox(px, py, isExp){ if (isExp){ ctx.fillStyle = '#f97316'; ctx.fillRect(px, py, TS, TS); return; } ctx.fillStyle = '#78350f'; ctx.fillRect(px, py, TS, TS); ctx.fillStyle = '#92400e'; ctx.fillRect(px+2, py+2, TS-4, TS-4); ctx.strokeStyle = '#d97706'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px+4, py+4); ctx.lineTo(px+TS-4, py+TS-4); ctx.moveTo(px+TS-4, py+4); ctx.lineTo(px+4, py+TS-4); ctx.stroke(); }
+function drawDoor(px, py){ ctx.fillStyle = '#9f1239'; ctx.fillRect(px+3, py+2, TS-6, TS-4); ctx.fillStyle = '#e11d48'; ctx.fillRect(px+6, py+5, TS-12, TS-10); ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+TS/2-2, py+TS/2-2, 4, 7); }
+function drawChest(px, py){ ctx.fillStyle = '#92400e'; ctx.fillRect(px+4, py+8, TS-8, TS-14); ctx.fillStyle = '#f59e0b'; ctx.fillRect(px+4, py+8, TS-8, 8); ctx.fillStyle = '#fde68a'; ctx.fillRect(px+TS/2-3, py+11, 6, 10); ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+TS/2-2, py+13, 4, 4); }
+function drawBomb(bomb, now){ var px = bomb.x * TS, py = bomb.y * TS; var pulse = Math.sin(now / 150) * 0.3 + 0.7; ctx.fillStyle = 'rgba(30,10,10,' + pulse + ')'; ctx.beginPath(); ctx.arc(px + TS/2, py + TS/2, TS/2 - 4, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#f87171'; ctx.lineWidth = 2; ctx.stroke(); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + TS/2 + 4, py + 6); ctx.quadraticCurveTo(px + TS/2 + 10, py + 2, px + TS/2 + 7, py - 2); ctx.stroke(); }
+function drawEnemy(e){ var px = e.x * TS, py = e.y * TS; ctx.fillStyle = '#dc2626'; ctx.fillRect(px+6, py+8, TS-12, TS-12); ctx.fillStyle = '#fff'; ctx.fillRect(px+9, py+12, 4, 4); ctx.fillRect(px+TS-13, py+12, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(px+10, py+13, 2, 2); ctx.fillRect(px+TS-12, py+13, 2, 2); ctx.fillStyle = '#b91c1c'; ctx.fillRect(px+8, py+TS-8, 4, 5); ctx.fillRect(px+TS-12, py+TS-8, 4, 5); }
+function drawPlayer(now){ var px = player.x * TS, py = player.y * TS; if (player.invincible && Math.floor(now / 100) % 2 === 0) return; ctx.fillStyle = CFG.color || '#6d28d9'; ctx.fillRect(px+6, py+5, TS-12, TS-10); ctx.fillStyle = '#fff'; ctx.fillRect(px+10, py+10, 4, 4); ctx.fillRect(px+TS-14, py+10, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(px+11, py+11, 2, 2); ctx.fillRect(px+TS-13, py+11, 2, 2); ctx.fillStyle = '#fff'; ctx.fillRect(px+11, py+TS-12, TS-22, 3); }
+
+/* ----- Input ----- */
 window.addEventListener('keydown', function(e){
-  var d = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], w: [0, -1], s: [0, 1], a: [-1, 0], d: [1, 0] }[e.key];
-  if (!d) return;
-  e.preventDefault();
-  move(d[0], d[1]);
+  if (modalOpen()) return;
+  var dir = { ArrowUp:'U', ArrowDown:'D', ArrowLeft:'L', ArrowRight:'R', w:'U', s:'D', a:'L', d:'R' }[e.key];
+  if (dir){ e.preventDefault(); movePlayer(dir); return; }
+  if (e.key === ' ' || e.key === 'b' || e.key === 'B'){ e.preventDefault(); placeBomb(); }
 });
-document.querySelectorAll('#dpad button').forEach(function(b){
-  b.addEventListener('click', function(){
-    var m = { U: [0, -1], D: [0, 1], L: [-1, 0], R: [1, 0] }[b.dataset.d];
-    move(m[0], m[1]);
-  });
-});
+document.querySelectorAll('#dpad button[data-d]').forEach(function(b){ b.addEventListener('click', function(){ movePlayer(b.dataset.d); }); });
+el('btnBomb').addEventListener('click', function(){ placeBomb(); });
+
+/* ----- Hooks de test (window.__game) ----- */
+window.__game = {
+  get lives(){ return lives; },
+  get enemiesCount(){ return enemies ? enemies.filter(function(e){ return e.alive; }).length : 0; },
+  get puzzleProgress(){ return puzzleProgress; },
+  get bombs(){ return bombs ? bombs.slice() : []; },
+  get gameOver(){ return gameOver; },
+  get gameWon(){ return gameWon; },
+  get player(){ return player ? { x: player.x, y: player.y, alive: player.alive, invincible: player.invincible } : null; },
+  get map(){ return map ? map.map(function(r){ return r.slice(); }) : []; },
+  get enemies(){ return enemies ? enemies.slice() : []; },
+  get explosions(){ return explosions ? explosions.slice() : []; },
+  placeBomb: function(){ placeBomb(); },
+  movePlayer: function(dir){ movePlayer(dir); },
+  explodeAllBombs: function(){ var list = bombs.slice(); for (var i = 0; i < list.length; i++) explodeBomb(list[i]); },
+  spawnEnemyAt: function(x, y){ enemies.push({ x: x, y: y, alive: true, id: 999 + enemies.length }); },
+  killPlayer: function(){ killPlayer(); },
+  restartWithSeed: function(seed){ __seed = seed; window.__seed = seed; puzzleProgress = null; init(); },
+  getDoorAt: function(x, y){ for (var d = 0; d < doorMeta.length; d++) if (doorMeta[d].x === x && doorMeta[d].y === y) return d; return -1; },
+  solveDoor: function(id){ onDoorSolved(id); },
+  teleportPlayer: function(x, y){ player.x = x; player.y = y; },
+  bfsStep: function(sx, sy, tx, ty){ return bfsStep(sx, sy, tx, ty); },
+  setTile: function(x, y, t){ if (map && map[y]) map[y][x] = t; },
+  getTile: function(x, y){ return map && map[y] ? map[y][x] : -1; }
+};
+
 ${SNIP.modalJs}
 ${SNIP.finalJs}
-updateHud(); draw();
+init();
 roomReady();
 <\/script>
 </body>
