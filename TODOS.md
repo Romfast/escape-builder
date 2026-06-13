@@ -215,14 +215,33 @@ Referință: §Design pct. 13 (TD5, PR2); D19 din plan.
 
 ---
 
-## Iterația 2 — Adventure Mode v0
-*(decizie office-hours: fundația contractului de azi e infrastructura directă)*
+### [x] Adventure Mode v0 — LIVRAT (2026-06-13)
+Opt-in flag `adventure` (default off) → campanie cu ramificare per-răspuns. Zero regresie non-adventure.
 
-- Contract de montare (`nextRoom`, `roomReady`, `roomError`) se refolosesc as-is.
-- Motoarele noi (orice stil) implementează aceleași 3 puncte + `parent.beep`.
-- `gameCampaign` se extinde cu ramificare: `if (answer === 'left') nextRoom({dir: 'left'})`.
-- Builder UI: adaugă câmpul "ramificare" per puzzle; drag & drop între camere.
-- Referință: design doc §NOT in scope "Adventure Mode v0".
+**E0** — `adventure: false` în `defaultState()`; checkbox `data-gb="adventure"` în builder (lângă voice/music);
+`var ADVENTURE = !!MASTER.adventure` în orchestrator.
+
+**E1** — `_lastGiven` în libJS; `checkAnswer` setează `_lastGiven` pe succes; `campaignDone()` calculează
+cheia branch (`'*'` free, text pentru tf, index string pentru choice) și o trimite în payload `nextRoom`.
+
+**E2** — `resolveBranch(idx, key)`: non-adventure→liniar; adventure→`p.branch[key]` (fallback `branch['*']`,
+apoi liniar idx+1); 'end'/out-of-range→'end'. `nextRoom` pe ramura ADVENTURE: 'end'→`owExitUnlocked=true`+
+`showOverworld` cu exit deblocat; număr→`owUnlocked[dest]=true`+`owTargetIdx=dest`+`showOverworld(dest)`.
+
+**E3** — `owCheckEnter`: blocat dacă `ADVENTURE && !owUnlocked[d.idx]`; exit folosește `owExitUnlocked` în
+loc de `owAllDone()`. `owRefreshDoors`: stilul `.locked` (dim+🔒) pentru ușile nedeblcate; hint/exit
+folosesc `owExitUnlocked`. `window.__ow.state`: adaugă `owUnlocked`/`owExitUnlocked`.
+
+**E4** — `saveProgress`: adaugă `doneList`, `owUnlocked`, `owExitUnlocked`, `target`. `tryResume`: pe
+ADVENTURE reconstruiește din `doneList` (non-contiguu), nu bucla liniară `0..saved.idx`.
+
+**E5** — `buildDiploma`: camerele `ADVENTURE && !roomDone[i]` → „neexplorată" (nu ☆☆☆ înșelător).
+
+**E6** — Builder UI: `normalizePuzzle` garantează `p.branch={}`; `cleanState` clampa țintele + strip
+`branch` când `!adventure`; `puzzleCard` afișează dropdown-uri ramificare per-puzzle (free=1, tf=2,
+choice=1/opțiune); `data-fb`/`data-bkey` handler în input listener; `adventure` change → `renderPuzzles()`.
+
+Verificat: smoke 35/35 (4 teste noi: branch-jump, resume non-contiguu, regression non-adventure, tf branch).
 
 ## Iterația 3 — Joc-în-URL + QR
 *(depinde de măsurarea dimensiunii JSON comprimate)*

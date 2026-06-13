@@ -138,6 +138,7 @@
       <textarea id="gFinal" data-g="finalMessage" rows="2"></textarea>
       <label class="ck"><input type="checkbox" id="gVoice" data-gb="voice"> Naratiune vocala &mdash; citeste povestea si intrebarile cu vocea sistemului (doar in Campanie multi-stil)</label>
       <label class="ck"><input type="checkbox" id="gMusic" data-gb="music"> Muzica de fundal &mdash; arpegiu calm care accelereaza sub 1 minut (doar in Campanie; buton de oprire in bara)</label>
+      <label class="ck"><input type="checkbox" id="gAdventure" data-gb="adventure"> Mod aventura &mdash; raspunsul decide urmatoarea camera (ramificare); configureaza per-puzzle mai jos (doar in Campanie)</label>
       <label>Timp limita (minute, 0 = fara) &mdash; ceas calm in bara, doar in Campanie</label>
       <input type="number" id="gTimer" data-g="timerMin" min="0" max="120" step="1" placeholder="0">
       <div class="help">Pornesti la "Incepe aventura". Sub 1 minut devine auriu. La expirare ingheata pe 0:00 &mdash; jocul continua, fara penalizare.</div>
@@ -184,6 +185,7 @@ const defaultState = () => ({
   charName: 'Alex',
   voice: false,
   music: false,
+  adventure: false,
   timerMin: 0,
   story: 'O comoara a fost ascunsa, iar singurul drum spre ea trece prin cateva incercari. Rezolva fiecare puzzle ca sa aduni literele cuvantului magic.',
   finalMessage: 'Felicitari! Ai gasit comoara!',
@@ -207,6 +209,7 @@ function normalizePuzzle(p) {
   if (typeof p.letter   !== 'string') p.letter   = '';
   if (!validStyles.includes(p.style || ''))        p.style    = '';
   if (typeof p.style    === 'undefined')            p.style    = '';
+  if (typeof p.branch !== 'object' || Array.isArray(p.branch) || p.branch === null) p.branch = {};
   return p;
 }
 
@@ -237,6 +240,23 @@ function renderGlobals() {
 function renderWord() {
   const word = state.puzzles.map(p => (p.letter || '').trim().charAt(0).toUpperCase()).join('');
   $('#finalWord').textContent = word || ' ';
+}
+
+function choiceOptsBuilder(p) {
+  return (p.choices || '').split('\n').map(l => l.trim()).filter(Boolean)
+    .map(o => o.charAt(0) === '*' ? o.slice(1).trim() : o);
+}
+
+function branchTargetSelect(p, pi, key, n) {
+  const branch = p.branch || {};
+  const cur = branch[key] !== undefined ? String(branch[key]) : '';
+  let opts = `<option value="" ${cur === '' ? 'selected' : ''}>Liniar (urmatoarea)</option>`;
+  for (let k = 0; k < n; k++) {
+    if (k === pi) continue;
+    opts += `<option value="${k}" ${cur === String(k) ? 'selected' : ''}>Camera ${k + 1}</option>`;
+  }
+  opts += `<option value="end" ${cur === 'end' ? 'selected' : ''}>Sfarsit</option>`;
+  return `<select data-fb data-bkey="${esc(key)}">${opts}</select>`;
 }
 
 function puzzleCard(p, i) {
@@ -304,6 +324,18 @@ function puzzleCard(p, i) {
           <input type="text" data-f="letter" maxlength="1" value="${esc(p.letter)}">
         </div>
       </div>
+      ${state.style === 'campaign' && state.adventure ? `
+      <div style="margin-top:10px;padding:10px 0 0;border-top:1px solid rgba(255,255,255,.1)">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#a78bfa;font-weight:700;margin-bottom:6px">Ramificare (Adventure Mode)</div>
+        ${p.type === 'free' ? `
+        <div class="row"><div><label>Daca raspunde corect &rarr; mergi la</label>${branchTargetSelect(p, i, '*', state.puzzles.length)}</div></div>` : ''}
+        ${p.type === 'tf' ? `
+        <div class="row"><div><label>Daca <strong>Adevarat</strong> &rarr; mergi la</label>${branchTargetSelect(p, i, 'Adevarat', state.puzzles.length)}</div></div>
+        <div class="row"><div><label>Daca <strong>Fals</strong> &rarr; mergi la</label>${branchTargetSelect(p, i, 'Fals', state.puzzles.length)}</div></div>` : ''}
+        ${p.type === 'choice' ? choiceOptsBuilder(p).map((opt, ci) => `
+        <div class="row"><div><label>Daca <strong>${esc(opt)}</strong> &rarr; mergi la</label>${branchTargetSelect(p, i, String(ci), state.puzzles.length)}</div></div>`).join('') : ''}
+        <div class="help" style="color:#fbbf24">&#9888; Reordonarea sau stergerea puzzle-urilor poate invalida ramificarile &mdash; verifica-le dupa!</div>
+      </div>` : ''}
     </div>`;
   return div;
 }
@@ -328,10 +360,23 @@ document.querySelectorAll('[data-g]').forEach(el => {
 });
 
 document.querySelectorAll('[data-gb]').forEach(el => {
-  el.addEventListener('change', () => { state[el.dataset.gb] = el.checked; onChange(); });
+  el.addEventListener('change', () => {
+    state[el.dataset.gb] = el.checked;
+    if (el.dataset.gb === 'adventure') renderPuzzles(); /* re-render: branch dropdowns apar/dispar */
+    onChange();
+  });
 });
 
 puzzleList.addEventListener('input', e => {
+  /* branch key selects (adventure mode) */
+  if (e.target.hasAttribute('data-fb')) {
+    const bkey = e.target.dataset.bkey;
+    const i = +e.target.closest('.puzzle').dataset.i;
+    if (!state.puzzles[i].branch) state.puzzles[i].branch = {};
+    state.puzzles[i].branch[bkey] = e.target.value;
+    onChange();
+    return;
+  }
   const f = e.target.dataset.f;
   if (!f) return;
   const i = +e.target.closest('.puzzle').dataset.i;
@@ -341,6 +386,7 @@ puzzleList.addEventListener('input', e => {
     card.querySelector('.head .t').textContent = state.puzzles[i].title || state.puzzles[i].question || 'Puzzle fara titlu';
   }
   if (f === 'type') { state.puzzles[i]._closed = false; renderPuzzles(); }
+  if (f === 'choices') renderPuzzles(); /* re-render: branch dropdowns per opțiune */
   onChange();
 });
 
@@ -417,10 +463,25 @@ $('#btnReload').addEventListener('click', refreshPreview);
 function cleanState() {
   const s = JSON.parse(JSON.stringify(state));
   s.timerMin = Math.max(0, Math.min(120, parseInt(s.timerMin, 10) || 0)); /* T10: minute întregi 0..120 */
-  s.puzzles.forEach(p => {
+  const nP = s.puzzles.length;
+  s.puzzles.forEach((p, pi) => {
     delete p._closed;
     /* D13: letter normalizat la 1 caracter alfanumeric (bug: un < strică scena SVG din point) */
     p.letter = (p.letter || '').replace(/[^A-Za-z0-9]/g, '').charAt(0);
+    if (!s.adventure) {
+      delete p.branch; /* strip branch când adventure e off */
+    } else {
+      /* clamp ținte out-of-range → '' (liniar) */
+      const br = p.branch || {};
+      Object.keys(br).forEach(k => {
+        const v = br[k];
+        if (v !== '' && v !== 'end') {
+          const n = +v;
+          if (isNaN(n) || n < 0 || n >= nP) br[k] = '';
+        }
+      });
+      p.branch = br;
+    }
   });
   return s;
 }
@@ -722,13 +783,14 @@ function starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3
 function finalWord(){ var w = ''; for (var i = 0; i < CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }
 function choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }
 function choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i < ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }
-function checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); return norm(given) !== '' && norm(given) === norm(exp); }
+var _lastGiven = '';
+function checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); var ok = norm(given) !== '' && norm(given) === norm(exp); if(ok){ _lastGiven = given; } return ok; }
 function beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }
 function confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i < 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }
 function roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }
 /* Contract de finalizare a camerei — un singur loc pentru payload-ul parent.nextRoom
    (înlocuiește duplicatele din showFinal/finale; D7). Citește totalStars + finalWord() la apel. */
-function campaignDone(){ if(CFG._campaign){ try{ parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:finalWord().charAt(0)}); }catch(e){} } }
+function campaignDone(){ if(CFG._campaign){ try{ var p = CFG.puzzles[0]; var bkey = '*'; if(p.type === 'tf'){ bkey = _lastGiven || 'Adevarat'; } else if(p.type === 'choice'){ var opts = choiceOpts(p); var bi = opts.findIndex(function(o){ return norm(o) === norm(_lastGiven); }); bkey = String(bi >= 0 ? bi : 0); } parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:finalWord().charAt(0), branch:bkey}); }catch(e){} } }
 window.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };
 if(CFG._campaign){
   /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */
@@ -1680,6 +1742,7 @@ body {
 .ow-door { position: absolute; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; color: #fff; border-radius: 7px; background: #e11d48; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
 .ow-door.solved { background: var(--c-gold); color: #3a2606; }
 .ow-door.target { box-shadow: 0 0 0 3px #a78bfa, 0 2px 10px rgba(167,139,250,.6); }
+.ow-door.locked { background: #374151; filter: grayscale(1) brightness(.65); opacity: .7; cursor: not-allowed; }
 .ow-exit { position: absolute; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 20px; border-radius: 7px; background: #3b2a63; filter: grayscale(1) brightness(.7); }
 .ow-exit.open { background: #166534; filter: none; box-shadow: 0 0 14px #22c55e; }
 .ow-player { position: absolute; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 24px; transition: left .1s linear, top .1s linear; z-index: 3; }
@@ -1962,6 +2025,9 @@ var activeIdx    = -1;
 var activeWindow = null;
 var readyTimer   = null;
 var roomDone     = {};
+var ADVENTURE    = !!MASTER.adventure;
+var owUnlocked   = {0: true}; /* ușile deblocate în adventure mode */
+var owExitUnlocked = false;
 
 /* ----- Resume — safeStore (D3) + djb2 hash (D11) ----- */
 function djb2(s){
@@ -1973,7 +2039,14 @@ var _RESUME_KEY = 'esc-camp-' + djb2(JSON.stringify(MASTER));
 function safeGet(){ try{ return JSON.parse(sessionStorage.getItem(_RESUME_KEY)); }catch(e){ return null; } }
 function safeSet(v){ try{ sessionStorage.setItem(_RESUME_KEY, JSON.stringify(v)); }catch(e){ /* webview restrictat — continuă fără resume */ } }
 function saveProgress(){
-  safeSet({ idx: activeIdx, totalStars: totalStars, collected: collected.slice(), roomStars: roomStars.slice(), skipped: skipped });
+  var payload = { idx: activeIdx, totalStars: totalStars, collected: collected.slice(), roomStars: roomStars.slice(), skipped: skipped };
+  if(ADVENTURE){
+    payload.doneList = Object.keys(roomDone).map(Number);
+    payload.owUnlocked = owUnlocked;
+    payload.owExitUnlocked = owExitUnlocked;
+    payload.target = owTargetIdx;
+  }
+  safeSet(payload);
 }
 function clearProgress(){ try{ sessionStorage.removeItem(_RESUME_KEY); sessionStorage.removeItem(_DEADLINE_KEY); }catch(e){} }
 
@@ -2173,6 +2246,20 @@ window.voiceSay = voiceSay; /* expus camerelor: parent.voiceSay(replica) — gua
 
 /* ----- parent.* API ----- */
 
+/* Calculează camera țintă după răspuns (adventure mode).
+   Returnează număr (idx cameră) sau 'end'. Non-adventure → idx+1. */
+function resolveBranch(idx, key){
+  if(!ADVENTURE) return idx + 1;
+  var p = MASTER.puzzles[idx];
+  var br = p && p.branch;
+  var t = br ? (br[key] !== undefined ? br[key] : br['*']) : undefined;
+  if(t === undefined || t === '') t = idx + 1; /* fallback liniar */
+  if(t === 'end') return 'end';
+  t = +t;
+  if(isNaN(t) || t < 0 || t >= N) return 'end';
+  return t;
+}
+
 window.nextRoom = function(data){
   /* Guard: doar de la camera activă (D5) */
   if(!activeWindow || frameEl.contentWindow !== activeWindow){
@@ -2189,10 +2276,24 @@ window.nextRoom = function(data){
   var letter = String(data.letter || '').replace(/[^A-Za-z0-9]/g,'').charAt(0).toUpperCase();
   if(letter) collected.push(letter);
   setDot(idx,'done');
-  saveProgress();
   console.log('[campaign] camera',idx,'done. stars=',data.stars,'letter=',letter);
-  var next = idx + 1;
-  if(next >= N){ clearProgress(); showFinale(); } else { showOverworld(next, data); }
+  if(ADVENTURE){
+    var dest = resolveBranch(idx, data.branch || '*');
+    if(dest === 'end'){
+      owExitUnlocked = true;
+      saveProgress();
+      showOverworld(idx, data); /* overworld cu exit deblocat — player merge la steag */
+    } else {
+      owUnlocked[dest] = true;
+      owTargetIdx = dest;
+      saveProgress();
+      showOverworld(dest, data);
+    }
+  } else {
+    saveProgress();
+    var next = idx + 1;
+    if(next >= N){ clearProgress(); showFinale(); } else { showOverworld(next, data); }
+  }
 };
 
 window.roomReady = function(idx){
@@ -2327,6 +2428,7 @@ function buildDiploma(){
     var lab = document.createElement('span'); lab.textContent = 'Camera ' + (i+1);
     var val = document.createElement('span');
     if(skipped[i]){ val.className = 'rskip'; val.textContent = '\\uD83D\\uDD12 s\\u0103rit\\u0103'; }
+    else if(ADVENTURE && !roomDone[i]){ val.className = 'rskip'; val.textContent = '\\u2014 neexplorat\\u0103'; }
     else { val.className = 'rstars'; val.textContent = _starStr(roomStars[i]||0); }
     row.appendChild(lab); row.appendChild(val); rooms.appendChild(row);
   }
@@ -2416,15 +2518,18 @@ function owRefreshDoors(){
   owDoors.forEach(function(d){
     var el = document.getElementById('ow-door-' + d.idx); if (!el) return;
     var done = !!roomDone[d.idx], isSkip = !!skipped[d.idx];
-    el.className = 'ow-door' + (done ? ' solved' : '') + (!done && d.idx === owTargetIdx ? ' target' : '');
+    var locked = ADVENTURE && !owUnlocked[d.idx] && !done;
+    el.className = 'ow-door' + (done ? ' solved' : '') + (!done && !locked && d.idx === owTargetIdx ? ' target' : '') + (locked ? ' locked' : '');
     if (isSkip) el.textContent = '\\ud83d\\udd12';
     else if (done) el.textContent = (MASTER.puzzles[d.idx].letter || '').trim().toUpperCase() || '\\u2713';
+    else if (locked) el.textContent = '\\ud83d\\udd12';
     else el.textContent = (d.idx + 1);
   });
-  var ex = document.getElementById('ow-exit'); if (ex) ex.className = 'ow-exit' + (owAllDone() ? ' open' : '');
-  document.getElementById('ow-hint').textContent = owAllDone()
-    ? 'Toate camerele rezolvate! Mergi la steag \\ud83c\\udfc1 ca să evadezi.'
-    : 'Mergi la ușa următoare (săgeți / WASD / butoane).';
+  var exitOpen = ADVENTURE ? owExitUnlocked : owAllDone();
+  var ex = document.getElementById('ow-exit'); if (ex) ex.className = 'ow-exit' + (exitOpen ? ' open' : '');
+  document.getElementById('ow-hint').textContent = exitOpen
+    ? 'Toate camerele rezolvate! Mergi la steag \\ud83c\\udfc1 ca s\\u0103 evadezi.'
+    : 'Mergi la u\\u015fa urm\\u0103toare (s\\u0103ge\\u021bi / WASD / butoane).';
 }
 
 function owCenter(){
@@ -2448,8 +2553,15 @@ function owMove(dc, dr){
 }
 
 function owCheckEnter(){
-  for (var i = 0; i < owDoors.length; i++){ var d = owDoors[i]; if (owPlayer.col === d.col && owPlayer.row === d.row){ if (!roomDone[d.idx]) owEnterDoor(d.idx); return; } }
-  if (owPlayer.col === owExit.col && owPlayer.row === owExit.row && owAllDone()){ owActive = false; showFinale(); }
+  for (var i = 0; i < owDoors.length; i++){
+    var d = owDoors[i];
+    if (owPlayer.col === d.col && owPlayer.row === d.row){
+      if (!roomDone[d.idx] && (!ADVENTURE || owUnlocked[d.idx])) owEnterDoor(d.idx);
+      return;
+    }
+  }
+  var canExit = ADVENTURE ? owExitUnlocked : owAllDone();
+  if (owPlayer.col === owExit.col && owPlayer.row === owExit.row && canExit){ owActive = false; clearProgress(); showFinale(); }
 }
 
 function owEnterDoor(idx){ if (!owActive) return; /* idempotență — a doua intrare ignorată (T4/D4) */ owActive = false; mountRoom(idx); }
@@ -2482,7 +2594,7 @@ document.querySelectorAll('#ow-dpad button[data-d]').forEach(function(b){
 
 /* Hooks pentru teste (conduc harta fără tastatură) */
 window.__ow = {
-  get state(){ return { player: { col: owPlayer.col, row: owPlayer.row }, target: owTargetIdx, active: owActive, allDone: owAllDone(), doors: owDoors.map(function(d){ return { idx: d.idx, col: d.col, row: d.row, solved: !!roomDone[d.idx] }; }) }; },
+  get state(){ return { player: { col: owPlayer.col, row: owPlayer.row }, target: owTargetIdx, active: owActive, allDone: owAllDone(), owUnlocked: owUnlocked, owExitUnlocked: owExitUnlocked, doors: owDoors.map(function(d){ return { idx: d.idx, col: d.col, row: d.row, solved: !!roomDone[d.idx] }; }) }; },
   enterDoor: function(i){ var d = owDoors[i]; if (d){ owPlayer.col = d.col; owPlayer.row = d.row; owRenderPlayer(); owCheckEnter(); } },
   enterExit: function(){ owPlayer.col = owExit.col; owPlayer.row = owExit.row; owRenderPlayer(); owCheckEnter(); }
 };
@@ -2496,7 +2608,9 @@ document.getElementById('intro-story').textContent = _introStory;
 document.getElementById('intro-promise').textContent = N+' camere \\u00b7 ${nStyles} stiluri \\u00b7 1 cuvânt magic';
 document.getElementById('btn-start').onclick = function(){
   unlockAudio(); /* gest direct pe părinte (handlerul global prinde și el, dar e idempotent) */
-  clearProgress(); owResetPlayer(); showOverworld(0);
+  clearProgress(); owResetPlayer();
+  owUnlocked = {0: true}; owExitUnlocked = false; /* reset adventure state la start nou */
+  showOverworld(0);
   startTimer(); /* ceasul pornește exact la „Începe aventura" (intro necronometrat) */
   startMusic(); /* muzica ambient pornește odată cu aventura (T10) */
   voiceSay(_introStory); /* după showOverworld → hideAll a rulat deja, nu mai anulează (D10) */
@@ -2549,12 +2663,21 @@ buildDots();
   roomStars  = saved.roomStars  || [];
   skipped    = saved.skipped    || {};
   Object.keys(skipped).forEach(function(k){ roomDone[+k] = true; setDot(+k,'done'); });
-  /* repornim pe hartă, la ușa camerei next */
+  if(ADVENTURE){
+    /* Adventure: restore non-contiguous done list (nu bucla liniară 0..idx) */
+    var dl = saved.doneList || [saved.idx];
+    dl.forEach(function(i){ if(i >= 0 && i < N){ roomDone[i] = true; setDot(i,'done'); } });
+    owUnlocked      = saved.owUnlocked     || {0: true};
+    owExitUnlocked  = !!saved.owExitUnlocked;
+    var target = (typeof saved.target === 'number' && saved.target >= 0 && saved.target < N) ? saved.target : 0;
+    owResetPlayer(); showOverworld(target);
+    startTimer(); startMusic();
+    return;
+  }
+  /* Non-adventure: bucla liniară (comportament existent) */
   var resumeIdx = saved.idx + 1;
-  /* marchează ușile deja rezolvate pe hartă (resume) */
   for(var di=0; di<=saved.idx; di++){ roomDone[di] = true; setDot(di,'done'); }
   if(resumeIdx >= N){
-    /* ultima cameră deja terminată — mergi direct la final */
     showFinale(); return;
   }
   owResetPlayer(); showOverworld(resumeIdx);

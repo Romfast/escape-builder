@@ -1450,4 +1450,209 @@ test.describe('Campanie E2E @campanie', () => {
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // Adventure Mode tests (E0-E6)
+  // ─────────────────────────────────────────────────────────────────────
+
+  /** Helper: genereaza cfg de campanie cu adventure ON. */
+  function adventureCfg(puzzles) {
+    return {
+      title: 'Test Adventure', player: 'Tester', color: '#6d28d9',
+      style: 'campaign', charName: 'Alex',
+      story: 'Aventura de test.',
+      finalMessage: 'Ai terminat aventura!',
+      adventure: true,
+      puzzles
+    };
+  }
+
+  test('adventure — branch-jump: room0→2 (sare room1), room2→exit, diploma neexplorata @campanie',
+    async ({ page }) => {
+      test.setTimeout(90000);
+      const errors = trackErrors(page);
+      const cfg = adventureCfg([
+        { title: 'Camera 0', type: 'free', question: 'R0?', answer: 'r0', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'A', style: 'classic', branch: { '*': 2 } },
+        { title: 'Camera 1', type: 'free', question: 'R1?', answer: 'r1', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'B', style: 'classic', branch: { '*': '' } },
+        { title: 'Camera 2', type: 'free', question: 'R2?', answer: 'r2', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'C', style: 'classic', branch: { '*': 'end' } }
+      ]);
+      const tmpPath = await writeCampaignHtml(page, cfg, 'adv-jump');
+
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        // Enter room 0 (door 0 unlocked in adventure)
+        await enterRoom(gp, 0);
+        await solveRoom(gp, 'classic', 'r0');
+
+        // After solving room 0: overworld with door 2 unlocked, door 1 locked
+        await waitOverworld(gp);
+        const stAfter0 = await gp.evaluate(() => window.__ow.state);
+        expect(stAfter0.owUnlocked[2], 'door 2 trebuie deblocata dupa room0').toBeTruthy();
+        expect(stAfter0.owUnlocked[1], 'door 1 trebuie sa ramana incuiata').toBeFalsy();
+        expect(stAfter0.doors[0].solved, 'room 0 trebuie sa fie done').toBe(true);
+
+        // Door 1 should be locked — entering it should be blocked (stay in overworld)
+        await gp.evaluate(() => window.__ow.enterDoor(1));
+        await gp.waitForTimeout(300);
+        const stLocked = await gp.evaluate(() => window.__ow.state);
+        expect(stLocked.active, 'harta trebuie sa ramana activa cand usa e incuiata').toBe(true);
+
+        // Enter room 2 (unlocked)
+        await enterRoom(gp, 2);
+        await solveRoom(gp, 'classic', 'r2');
+
+        // After solving room 2: exit should be unlocked
+        await waitOverworld(gp);
+        const stAfter2 = await gp.evaluate(() => window.__ow.state);
+        expect(stAfter2.owExitUnlocked, 'exit trebuie deblocat dupa room2→end').toBe(true);
+
+        // Enter exit → finale
+        await gp.evaluate(() => window.__ow.enterExit());
+        await gp.waitForFunction(
+          () => document.getElementById('finale')?.classList.contains('show'),
+          null, { timeout: 5000 }
+        );
+
+        // Open diploma → camera 1 should be "neexplorata"
+        await gp.locator('#btn-diploma').click();
+        const diplomaText = await gp.locator('#dipl-rooms').innerText();
+        expect(diplomaText).toMatch(/neexplorat/i);
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, 'Builder errors:\n' + errors.join('\n')).toHaveLength(0);
+    });
+
+  test('adventure — resume non-contiguu: room0 done → reload → room0 done + usa2 deblocata + usa1 incuiata @campanie',
+    async ({ page }) => {
+      test.setTimeout(60000);
+      const errors = trackErrors(page);
+      const cfg = adventureCfg([
+        { title: 'Camera 0', type: 'free', question: 'R0?', answer: 'r0', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'A', style: 'classic', branch: { '*': 2 } },
+        { title: 'Camera 1', type: 'free', question: 'R1?', answer: 'r1', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'B', style: 'classic', branch: { '*': '' } },
+        { title: 'Camera 2', type: 'free', question: 'R2?', answer: 'r2', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'C', style: 'classic', branch: { '*': 'end' } }
+      ]);
+      const tmpPath = await writeCampaignHtml(page, cfg, 'adv-resume');
+
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        // Solve room 0 → branches to room 2, skips room 1
+        await enterRoom(gp, 0);
+        await solveRoom(gp, 'classic', 'r0');
+        await waitOverworld(gp);
+
+        // Reload — tryResume trebuie sa reconstituie starea non-contigua
+        await gp.reload();
+        await gp.waitForLoadState('domcontentloaded');
+
+        // Asteapta overworld activ (resume, nu intro)
+        await gp.waitForFunction(() => window.__ow && window.__ow.state.active, null, { timeout: 8000 });
+
+        const stResume = await gp.evaluate(() => window.__ow.state);
+        expect(stResume.doors[0].solved, 'room 0 trebuie sa fie done dupa resume').toBe(true);
+        expect(stResume.owUnlocked[2], 'usa 2 trebuie deblocata dupa resume').toBeTruthy();
+        expect(stResume.owUnlocked[1], 'usa 1 trebuie sa ramana incuiata dupa resume').toBeFalsy();
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, 'Builder errors:\n' + errors.join('\n')).toHaveLength(0);
+    });
+
+  test('adventure off — regresia non-adventure: toate usile intrabile in orice ordine @campanie',
+    async ({ page }) => {
+      test.setTimeout(60000);
+      const errors = trackErrors(page);
+      // adventure:false (default) — toate ușile deblocate, orice ordine
+      const cfg = campaignCfg(3, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'adv-off');
+
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        // In non-adventure: can enter door 1 first (not door 0)
+        await waitOverworld(gp);
+        await gp.evaluate(() => window.__ow.enterDoor(1));
+        await gp.waitForFunction(
+          () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+          null, { timeout: 8000 }
+        );
+        // overworld became inactive (we entered a room) — confirms door 1 was enterable
+        const stAfter = await gp.evaluate(() => window.__ow.state);
+        expect(stAfter.active, 'harta trebuie sa fie inactiva dupa intrarea in room1').toBe(false);
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, 'Builder errors:\n' + errors.join('\n')).toHaveLength(0);
+    });
+
+  test('adventure — branch tf: raspuns Adevarat→2, Fals→1 deblocheza usa corecta @campanie',
+    async ({ page }) => {
+      test.setTimeout(60000);
+      const errors = trackErrors(page);
+      const cfg = adventureCfg([
+        { title: 'Camera 0', type: 'tf', question: 'E adevarat?', answer: '', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'A', style: 'classic', branch: { Adevarat: 2, Fals: 1 } },
+        { title: 'Camera 1', type: 'free', question: 'R1?', answer: 'r1', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'B', style: 'classic', branch: {} },
+        { title: 'Camera 2', type: 'free', question: 'R2?', answer: 'r2', tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'C', style: 'classic', branch: {} }
+      ]);
+      const tmpPath = await writeCampaignHtml(page, cfg, 'adv-tf');
+
+      const gp = await page.context().newPage();
+      const gameErrors = trackErrors(gp);
+
+      try {
+        await gp.goto('file://' + tmpPath);
+        await gp.locator('#btn-start').click();
+
+        // Enter room 0 (tf puzzle, classic engine: buttons in #answers)
+        await waitOverworld(gp);
+        await gp.evaluate(() => window.__ow.enterDoor(0));
+        await gp.waitForFunction(
+          () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+          null, { timeout: 8000 }
+        );
+        const ifl = gp.frameLocator('#room-frame');
+        await ifl.locator('#btnStart').click();
+        // Click "Adevarat" (correct answer → branch key 'Adevarat' → should unlock door 2)
+        await ifl.locator('#answers button:text("Adevarat")').click();
+        await gp.waitForTimeout(1200); // animatie next()
+
+        await waitOverworld(gp);
+        const st = await gp.evaluate(() => window.__ow.state);
+        expect(st.owUnlocked[2], 'Adevarat→2: usa 2 trebuie deblocata').toBeTruthy();
+        expect(st.owUnlocked[1], 'Adevarat→2: usa 1 trebuie sa ramana incuiata').toBeFalsy();
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+
+      expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+      expect(errors, 'Builder errors:\n' + errors.join('\n')).toHaveLength(0);
+    });
+
 });
