@@ -231,7 +231,10 @@ Mesajul creatorului
 
 ## 11. Timer Calm (§Design pct. 10 — Etapa 2 / PR2)
 
-> Implementare în T10/PR2.
+> **LIVRAT** (2026-06-13). Opt-in din builder (câmp „Timp limită (minute)", default 0 = fără).
+> Implementare: `#chrome-timer` în bara chrome; `startTimer/tickTimer/stopTimer`; deadline absolut
+> în `sessionStorage` (`_DEADLINE_KEY`). Sub 1 min → `.low` (auriu); expirat → `.expired` (auriu, opac).
+> Test smoke „timer calm" (format, gold, freeze, resume păstrează ceasul).
 
 - Pornește **exact** la click „Începe aventura" (intro necronometrat)
 - Afișat în chrome: `M:SS`, neutru (`color: var(--c-ink)`)

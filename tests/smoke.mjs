@@ -671,6 +671,74 @@ test.describe('Campanie E2E @campanie', () => {
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  test('timer calm — porneste la start, auriu sub 1 min, ingheata la expirare, resume pastreaza ceasul (T10/§Design pct.10) @campanie',
+    async ({ page }) => {
+      const errors = trackErrors(page);
+      const cfg = campaignCfg(3, 'classic');
+      cfg.timerMin = 1;
+      const tmpPath = await writeCampaignHtml(page, cfg, 'timer');
+      const gp = await page.context().newPage();
+
+      try {
+        await gp.goto('file://' + tmpPath);
+
+        // Intro necronometrat — ceasul e ascuns pana la start
+        expect(await gp.locator('#chrome-timer').isVisible(), 'timer ascuns pe intro').toBe(false);
+
+        await gp.locator('#btn-start').click();
+
+        // Dupa start: vizibil, format M:SS, aproape de 1:00
+        const timer = gp.locator('#chrome-timer');
+        await expect(timer).toBeVisible();
+        await expect(timer).toHaveText(/^\d:\d\d$/);
+        const t0 = await timer.textContent();
+        const sec0 = (+t0.split(':')[0]) * 60 + (+t0.split(':')[1]);
+        expect(sec0, 'ceasul porneste ~1:00').toBeGreaterThan(50);
+        expect(sec0).toBeLessThanOrEqual(60);
+
+        // Deadline ABSOLUT salvat in sessionStorage (resume pastreaza ceasul)
+        const dl = await gp.evaluate(() => +sessionStorage.getItem(_DEADLINE_KEY));
+        expect(dl, 'deadline absolut in sessionStorage').toBeGreaterThan(Date.now());
+
+        // Sub 1 minut → auriu (.low). Manipulam deadline determinist.
+        await gp.evaluate(() => { _deadline = Date.now() + 5000; tickTimer(); });
+        await expect(timer).toHaveText('0:05');
+        await expect(timer).toHaveClass(/low/);
+
+        // Expirare → ingheata pe 0:00 + .expired; jocul curge nestingherit
+        await gp.evaluate(() => { _deadline = Date.now() - 1000; tickTimer(); });
+        await expect(timer).toHaveText('0:00');
+        await expect(timer).toHaveClass(/expired/);
+
+        // Jocul continua dupa expirare (zero penalizare): rezolva camera 0
+        await enterRoom(gp, 0);
+        await solveRoom(gp, 'classic', 'r1');
+        await waitOverworld(gp);
+
+        // Resume pastreaza ceasul: suprascriem deadline-ul cu o valoare cunoscuta, reload
+        await gp.evaluate(() => { sessionStorage.setItem(_DEADLINE_KEY, String(Date.now() + 8000)); });
+        await gp.reload();
+        await gp.waitForLoadState('domcontentloaded');
+        await gp.waitForFunction(
+          () => window.__ow && window.__ow.state.active &&
+                document.getElementById('overworld')?.classList.contains('show'),
+          null, { timeout: 5000 }
+        );
+
+        // Ceasul reia de la deadline-ul salvat (~0:08), NU resetat la 1:00
+        await expect(gp.locator('#chrome-timer')).toBeVisible();
+        const tR = await gp.locator('#chrome-timer').textContent();
+        const secR = (+tR.split(':')[0]) * 60 + (+tR.split(':')[1]);
+        expect(secR, 'resume reia ceasul (nu reset la 60)').toBeLessThan(55);
+        expect(secR).toBeGreaterThan(0);
+
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+      expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
   // ─────────────────────────────────────────────────────────────────────
   // Test 3: Camera moartă — timeout 4s → skip-banner + cod eroare
   // ─────────────────────────────────────────────────────────────────────

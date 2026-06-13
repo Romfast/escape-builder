@@ -18,7 +18,7 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
 - [x] **Audit a11y motoare** — LIVRAT (vezi §dedicată mai jos). Smoke 26/26.
 
 **PR2 livrat (2026-06-13):** audio camere `651025b`, voce `da93d84`, unificare `ab11089`, a11y (acest commit).
-Rămas din Etapa 2: muzică timer (T10) + Adventure Mode v0. (D7 LIVRAT — vezi §dedicată mai jos.)
+Rămas din Etapa 2: muzică timer (T10) + Adventure Mode v0. (D7 + Timer Calm LIVRATE — vezi §§ mai jos.)
 
 ### [x] Bomberman polish (feedback user 2026-06-13) — LIVRAT
 Trei probleme raportate + o lipsă, toate în `gameArcade` (`escape-builder.html`):
@@ -96,7 +96,17 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
 
 ## Post-PR1 (după ship-ul campaniei)
 
-### Muzică accelerată la timer (PR2 / T10)
+### [x] Timer Calm (§Design pct.10 / T10) — LIVRAT (2026-06-13)
+Ceas M:SS în bara chrome a campaniei. Opt-in din builder (câmp „Timp limită (minute)", default 0 = fără;
+`cleanState` coerce la întreg 0..120). Pornește la „Începe aventura" (intro necronometrat); deadline
+ABSOLUT în `sessionStorage` (`_DEADLINE_KEY`) → resume-ul (reload mid-campanie) NU resetează ceasul.
+Sub 1 minut → auriu (`.low`); la expirare îngheață pe `0:00` + marcaj discret (`.expired`, auriu opac),
+jocul curge nestingherit (zero penalizare, stelele rămân). Fără roșu pulsant (public copii) → reduced-motion
+safe by default. `exemplu-campanie.html` regenerat (rămâne fără timer — opt-in, ca vocea). Verificat:
+smoke 29/29 (test nou „timer calm": format M:SS, prag auriu, freeze la expirare, jocul continuă, resume
+păstrează ceasul). Commit: (acest commit). Următorul: muzică T10 (accelerare sub 1 min — depinde de timer).
+
+### Muzică accelerată la timer (PR2 / T10) — depinde de Timer Calm (LIVRAT)
 - Audio ambient în campanie: track calm → accelerare progresivă sub 1 minut.
 - Ownership: părintele deține AudioContext; camerele nu știu de muzică.
 - Fallback: zero pedeapsă dacă AudioContext lipsă (webview restricitve).
