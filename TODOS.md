@@ -10,6 +10,15 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
 
 ---
 
+## ▶ PR2 în curs (le iau pe rând, cerere user 2026-06-13)
+- [x] **Audio camere** — fix REAL (vezi S1 mai jos, commit `651025b`): unlock pe primul gest global
+  (acoperă resume), nu doar btn-start; test rescris (headless crea ctx `running` trivial).
+- [x] **Narațiune vocală (D10)** — LIVRAT (vezi §„Narațiune vocală" mai jos). Smoke 25/25.
+- [ ] **Unificare `finale()` terminal pe `SNIP.finalJs`** (vezi §dedicată mai jos).
+- [ ] **Audit a11y motoare** (vezi §dedicată mai jos).
+
+---
+
 ## ▶ BOARD ACTIV — Iterația 2 (Adventure Mode / restyle)
 
 Direcția cerută de user (decizii confirmate, vezi `HANDOFF.md`). Model hibrid ca la PR1:
@@ -77,12 +86,20 @@ portează în `escape-builder.html` (un singur fișier, integrare secvențială)
 - Edge: muzica se oprește la `speechSynthesis.cancel()` dacă vocea e activă simultan.
 - Legat de: T10 (PR2), timer countdown în bara chrome (§Design pct. 10).
 
-### Edge case-uri voce (SpeechSynthesis) — PR2
-- `speechSynthesis.getVoices()` poate fi gol sincron → ascultă `voiceschanged`.
-- Fără voce `ro-*` → fallback la vocea default (nu crash, nu tăcere).
-- Voce activă mid-cameră → `speechSynthesis.cancel()` la demontare cameră (pater deține).
-- `parent.voiceSay(text)` = no-op în jocurile simple (funcția nu există) → guard `typeof parent.voiceSay === 'function'`.
-- Referință: D10 din plan; E2 Etapa 2 pct. 3.
+### [x] Narațiune vocală (SpeechSynthesis, D10) — LIVRAT (PR2)
+Feature NOU (nu doar edge-cases — voce nu exista deloc). Opt-in din builder (checkbox
+`voice`, off implicit), buton 🔊/🔇 în bara chrome a campaniei (părinte deține). Orchestrator-only
+voicing (uniform pe toate 5 motoarele, fără dublu-citit): poveste la „Începe aventura", întrebarea
+camerei la `roomReady`, mesajul final la `showFinale`. Toate edge-case-urile tratate:
+- `getVoices()` gol sincron → re-citire la `onvoiceschanged` (`_pickVoice`).
+- Fără voce `ro-*` → vocea default (nu setăm `u.voice`, doar `u.lang='ro-RO'`).
+- `speechSynthesis.cancel()` în `hideAll()` → fără replici fantomă la schimbarea scenei.
+- Fără `speechSynthesis` în window → buton ascuns, tot devine no-op.
+- `window.voiceSay` expus pe părinte (pt. viitor: replici din motoare cu guard `typeof`).
+Bug prins de test: `#btn-voice{display:inline-flex}` bătea UA `[hidden]` → adăugat `[hidden]{display:none}`.
+Verificat: smoke 25/25 (test nou „voce — naratiune opt-in") + live MCP (buton, toggle, checkbox builder).
+NOTĂ scope: motoarele NU cheamă încă `parent.voiceSay` (am evitat dublu-citit cu roomReady); dacă
+pe viitor vrei replici chat citite individual, adaugă în `charMsg` cu guard `typeof parent.voiceSay`.
 
 ### Unificarea `finale()` din terminal pe `SNIP.finalJs` (PR2 primul pas)
 - Astăzi terminalul are propria funcție `finale()` (escape-builder.html:863) care NU folosește `SNIP.finalJs`.

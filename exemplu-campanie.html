@@ -30,6 +30,15 @@ body {
 }
 #chrome-title { font-size: 15px; font-weight: 700; }
 #chrome .sp { flex: 1; }
+#btn-voice {
+  width: 34px; height: 34px; min-width: 34px; padding: 0; border: 0; cursor: pointer;
+  border-radius: 8px; background: rgba(255,255,255,.12); color: #fff;
+  font-size: 17px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+}
+#btn-voice[hidden] { display: none; } /* id batea specificitatea UA [hidden] */
+#btn-voice:hover { background: rgba(255,255,255,.22); }
+#btn-voice[aria-pressed="false"] { opacity: .5; }
+#btn-voice:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
 #dots { display: flex; gap: 8px; }
 #dots span {
   width: 10px; height: 10px; border-radius: 50%;
@@ -192,6 +201,7 @@ body {
 <div id="chrome">
   <span id="chrome-title">Comoara ascunsa</span>
   <div class="sp"></div>
+  <button id="btn-voice" type="button" aria-label="Naratiune vocala" hidden>&#128266;</button>
   <div id="dots"></div>
 </div>
 
@@ -347,6 +357,40 @@ function _onFirstGesture(){
 document.addEventListener('pointerdown',_onFirstGesture,true);
 document.addEventListener('keydown',_onFirstGesture,true);
 
+/* ----- Narațiune vocală (D10) — opt-in via MASTER.voice, buton în bara chrome.
+   Edge cases tratate: (1) getVoices() poate fi gol sincron → re-citim la voiceschanged;
+   (2) fără voce ro-* → vocea default a sistemului (nu setăm u.voice); (3) la fiecare
+   schimbare de scenă (hideAll) → speechSynthesis.cancel() (fără replici fantomă);
+   (4) fără API → butonul rămâne ascuns, totul devine no-op. */
+var SPEECH   = ('speechSynthesis' in window) && !!MASTER.voice;
+var voiceOn  = SPEECH; /* pornit implicit când feature-ul e activat din builder */
+var _roVoice = null, _voicesReady = false;
+function _pickVoice(){
+  try{
+    var vs = window.speechSynthesis.getVoices();
+    if(!vs || !vs.length) return; /* gol sincron — așteptăm voiceschanged */
+    _voicesReady = true;
+    _roVoice = vs.filter(function(v){ return /(^|[^a-z])ro([-_]|$)/i.test(v.lang||''); })[0] || null;
+  }catch(e){}
+}
+if(SPEECH){
+  _pickVoice();
+  try{ window.speechSynthesis.onvoiceschanged = _pickVoice; }catch(e){}
+}
+function voiceCancel(){ if(SPEECH){ try{ window.speechSynthesis.cancel(); }catch(e){} } }
+function voiceSay(text){
+  if(!SPEECH || !voiceOn || !text) return;
+  try{
+    window.speechSynthesis.cancel();
+    if(!_voicesReady) _pickVoice();
+    var u = new SpeechSynthesisUtterance(String(text));
+    if(_roVoice){ u.voice = _roVoice; u.lang = _roVoice.lang; } else { u.lang = 'ro-RO'; }
+    u.rate = 1; u.pitch = 1;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+window.voiceSay = voiceSay; /* expus camerelor: parent.voiceSay(replica) — guard în motoare */
+
 /* ----- parent.* API ----- */
 
 window.nextRoom = function(data){
@@ -375,6 +419,8 @@ window.roomReady = function(idx){
   if(+idx !== activeIdx) return;
   clearTimeout(readyTimer);
   frameEl.setAttribute('data-room-ready','true'); /* hook pentru tests */
+  var q = MASTER.puzzles[idx] && MASTER.puzzles[idx].question;
+  if(q) voiceSay(q); /* citește întrebarea camerei (D10) */
 };
 
 window.roomError = function(idx, msg){
@@ -485,6 +531,7 @@ function showFinale(){
   var pl  = MASTER.player || '';
   document.getElementById('fin-msg').textContent = pl ? pl+', '+msg.charAt(0).toLowerCase()+msg.slice(1) : msg;
   beep(true); confetti();
+  voiceSay(document.getElementById('fin-msg').textContent); /* citește mesajul final (D10) */
 }
 
 /* ----- Confetti ----- */
@@ -501,6 +548,7 @@ function confetti(){
 
 var overworldEl = document.getElementById('overworld');
 function hideAll(){
+  voiceCancel(); /* fără replici fantomă la schimbarea scenei (D10) */
   [introEl,overworldEl,skipEl,finaleEl].forEach(function(el){ el.classList.remove('show'); });
 }
 
@@ -624,12 +672,31 @@ owBuild();
 
 /* ----- Intro ----- */
 document.getElementById('intro-title').textContent = MASTER.title;
-document.getElementById('intro-story').textContent = (MASTER.player?'Salut, '+MASTER.player+'! ':'')+MASTER.story;
+var _introStory = (MASTER.player?'Salut, '+MASTER.player+'! ':'')+MASTER.story;
+document.getElementById('intro-story').textContent = _introStory;
 document.getElementById('intro-promise').textContent = N+' camere \u00b7 3 stiluri \u00b7 1 cuvânt magic';
 document.getElementById('btn-start').onclick = function(){
   unlockAudio(); /* gest direct pe părinte (handlerul global prinde și el, dar e idempotent) */
   clearProgress(); owResetPlayer(); showOverworld(0);
+  voiceSay(_introStory); /* după showOverworld → hideAll a rulat deja, nu mai anulează (D10) */
 };
+
+/* ----- Buton voce în bara chrome (D10) ----- */
+var btnVoice = document.getElementById('btn-voice');
+if(SPEECH && btnVoice){
+  btnVoice.hidden = false;
+  var _syncVoiceBtn = function(){
+    btnVoice.innerHTML = voiceOn ? '&#128266;' : '&#128263;'; /* 🔊 / 🔇 */
+    btnVoice.setAttribute('aria-pressed', voiceOn ? 'true' : 'false');
+    btnVoice.title = voiceOn ? 'Naratiune pornita — apasa ca sa opresti' : 'Naratiune oprita — apasa ca sa pornesti';
+  };
+  _syncVoiceBtn();
+  btnVoice.onclick = function(){
+    voiceOn = !voiceOn;
+    if(!voiceOn) voiceCancel();
+    _syncVoiceBtn();
+  };
+}
 
 buildDots();
 

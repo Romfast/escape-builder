@@ -958,6 +958,8 @@ test.describe('Campanie E2E @campanie', () => {
       const gp = await page.context().newPage();
       try {
         await gp.goto('file://' + tmpPath);
+        // Fara voice in cfg → butonul de naratiune ramane ascuns (opt-in, D10)
+        await expect(gp.locator('#btn-voice')).toBeHidden();
         // Inainte de orice gest: ctx inexistent (creat lazy)
         const before = await gp.evaluate(
           () => (window.beep && window.beep._ctx) ? window.beep._ctx.state : 'NO_CTX'
@@ -987,6 +989,66 @@ test.describe('Campanie E2E @campanie', () => {
         expect(heal.mid, 'ctx trebuie suspendat inainte de self-heal').toBe('suspended');
         expect(heal.osc, 'beep trebuie sa creeze oscilatoare').toBeGreaterThan(0);
         expect(heal.end, 'beep trebuie sa reia ctx-ul suspendat').toBe('running');
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+    });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 9b (PR2): Voce — naratiune opt-in (D10). Headless nu reda audio, dar
+  // spionam speechSynthesis.speak/cancel: butonul apare doar la voice=true,
+  // povestea+intrebarea sunt citite, schimbarea scenei cheama cancel, iar
+  // toggle-off face voiceSay no-op.
+  // ─────────────────────────────────────────────────────────────────────
+  test('voce — naratiune opt-in: buton, citeste poveste/intrebare, cancel + toggle @campanie',
+    async ({ page }) => {
+      const cfg = campaignCfg(3, 'classic');
+      cfg.voice = true;
+      const tmpPath = await writeCampaignHtml(page, cfg, 'voice');
+      const gp = await page.context().newPage();
+      try {
+        await gp.goto('file://' + tmpPath);
+        // Spy: inlocuim speak (sa nu redea real) si numaram cancel
+        await gp.evaluate(() => {
+          window.__spoken = []; window.__cancels = 0;
+          const ss = window.speechSynthesis;
+          ss.speak = (u) => { window.__spoken.push(String((u && u.text) || '')); };
+          const oc = ss.cancel.bind(ss);
+          ss.cancel = () => { window.__cancels++; try { oc(); } catch (e) {} };
+        });
+        // Butonul apare cand voice=true, pornit implicit
+        await expect(gp.locator('#btn-voice')).toBeVisible();
+        expect(await gp.locator('#btn-voice').getAttribute('aria-pressed')).toBe('true');
+
+        // Start → citeste povestea
+        await gp.locator('#btn-start').click();
+        await waitOverworld(gp);
+        await gp.waitForTimeout(120);
+        const afterStart = await gp.evaluate(() => window.__spoken.slice());
+        expect(afterStart.some(t => t.includes('O campanie de test')),
+          'povestea trebuie citita la start').toBeTruthy();
+
+        // Intra in camera → roomReady citeste intrebarea; tranzitia cheama cancel
+        await enterRoom(gp, 0);
+        await gp.waitForFunction(
+          () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+          null, { timeout: 8000 }
+        );
+        await gp.waitForTimeout(120);
+        const afterRoom = await gp.evaluate(() => window.__spoken.slice());
+        expect(afterRoom.some(t => t.includes('Raspunde 1')),
+          'intrebarea camerei trebuie citita la roomReady').toBeTruthy();
+        expect(await gp.evaluate(() => window.__cancels),
+          'schimbarea scenei trebuie sa cheme speechSynthesis.cancel').toBeGreaterThan(0);
+
+        // Toggle off → aria-pressed false + voiceSay devine no-op
+        await gp.locator('#btn-voice').click();
+        expect(await gp.locator('#btn-voice').getAttribute('aria-pressed')).toBe('false');
+        await gp.evaluate(() => window.voiceSay('NU_TREBUIE_CITIT'));
+        const spokenAfter = await gp.evaluate(() => window.__spoken.slice());
+        expect(spokenAfter.includes('NU_TREBUIE_CITIT'),
+          'voiceSay trebuie no-op cand naratiunea e oprita').toBeFalsy();
       } finally {
         await gp.close();
         try { unlinkSync(tmpPath); } catch (_) {}
