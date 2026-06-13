@@ -6,6 +6,15 @@ Generator de jocuri escape room intr-un singur fisier HTML, fara backend, fara b
 
 Deschide `escape-builder.html` in browser (dublu-click, merge si de pe `file://`).
 
+Pe un mediu fara desktop (container/server remote), serveste fisierele static si deschide din browserul tau:
+
+```bash
+cd /workspace/escape-builder
+python3 -m http.server 8000
+```
+
+Apoi navigheaza la `http://<IP-server>:8000/escape-builder.html` (in containerul curent: `http://10.0.20.171:8000/escape-builder.html`).
+
 - **Stanga**: editor — titlu, poveste, culoare, **stil joc**, puzzle-uri (raspuns liber / adevarat-fals / variante), indiciu si litera per puzzle.
 - **Dreapta**: preview live — jocul exact cum va arata, jucabil direct in pagina.
 - **Exporta jocul HTML**: descarca un joc standalone pe care il trimiti pe telefon/email; merge offline.
@@ -29,3 +38,15 @@ Proiectul curent se salveaza automat in `localStorage` la fiecare modificare.
 - Fiecare puzzle poate da o litera; literele formeaza cuvantul final, dezvaluit la castig (cu confetti, in functie de stil).
 - Sunete WebAudio la corect/gresit; raspunsurile se compara fara diacritice si fara majuscule.
 - Toate motoarele de joc impart aceeasi biblioteca (config, scor, verificare raspuns, modal, ecran final) generata din builder.
+
+## Testare
+
+Suita de teste Playwright (smoke + campanie), fara server, direct pe `file://`:
+
+```bash
+npx playwright test tests/smoke.mjs              # toata suita (26/26)
+npx playwright test tests/smoke.mjs --grep @regresie
+npx playwright test tests/smoke.mjs --grep @campanie
+```
+
+Detalii harness in `tests/AGENTS.md`.
