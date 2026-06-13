@@ -3,6 +3,39 @@
 Backlog post-PR1 și note tehnice pentru iterațiile viitoare.
 Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2026-06-12-campania-multi-stil.md`
 
+> **Acest fișier e BOARD-UL DE PROGRES (sursa durabilă).** Task list-ul din harness se
+> resetează între sesiuni → se uită. Aici nu. La fiecare sesiune: citește board-ul activ
+> de mai jos ÎNTÂI, mută `[ ]→[~]→[x]` pe măsură ce avansezi, commit-uiește schimbarea.
+> Convenție: `[ ]` neînceput · `[~]` în lucru · `[x]` gata+verificat · `[!]` blocat.
+
+---
+
+## ▶ BOARD ACTIV — Iterația 2 (Adventure Mode / restyle)
+
+Direcția cerută de user (decizii confirmate, vezi `HANDOFF.md`). Model hibrid ca la PR1:
+părțile grele se prototipează în PARALEL în `scratch/`, verificate jucabile, apoi integrator le
+portează în `escape-builder.html` (un singur fișier, integrare secvențială).
+
+- [ ] **S1 — fix sunet campanie** *(prioritar, rapid)*
+      Reinvestighează ÎNTÂI: `beep` E deja definit la `escape-builder.html:1725` în orchestrator
+      (devine `window.beep` → `parent.beep` ar trebui să rezolve). Ipoteza veche din HANDOFF
+      (beep nedefinit) pare GREȘITĂ. Suspect real: AudioContext `suspended` până la gest user,
+      sau context creat înainte de click „Începe aventura". Confirmă cauza în browser înainte de fix.
+- [ ] **S2a — prototip Bomberman complet** → `scratch/bomberman-proto.html`
+      Standalone jucabil: dușmani cu AI urmărire, bombe plasabile + explozii în lanț, blocuri
+      distructibile, pericole, vieți + game-over + respawn fără pierderea progresului puzzle,
+      plasare ALEATOARE cufere/uși/blocuri. Păstrează `openPuzzle` pe uși roșii + cufăr auriu = scăpare.
+- [ ] **S2b — prototip hartă overworld** → `scratch/overworld-proto.html`
+      Personaj top-down care intră pe ușă → încarcă camera → revine pe hartă. Înlocuiește coridorul
+      static. Respectă contractul campaniei: iframe per cameră, `parent.nextRoom`/`roomReady`.
+- [ ] **S2c — `STYLES.md`** — direcție restyle pentru cele 5 stiluri individuale.
+- [!] **S3 — integrare în `escape-builder.html`** *(blocat de S2a+S2b+S2c)*
+      Portează prototipurile (template literals → DUBLEAZĂ backslash-urile) + regenerează demo-urile.
+- [!] **S4 — extinde `tests/smoke.mjs`** *(blocat de S3)* — bomberman, hartă, audio, regresie.
+
+**Stare la 2026-06-13:** PR1 livrat (`a42c960`, suita 21/21). Iterația 2 = neîncepută;
+`scratch/` are doar artefacte PR1, fără proto-uri noi.
+
 ---
 
 ## Post-PR1 (după ship-ul campaniei)
