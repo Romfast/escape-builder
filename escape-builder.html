@@ -1046,7 +1046,7 @@ ${SNIP.baseCss}${SNIP.modalCss}${SNIP.finalCss}
 <h1>${esc(cfg.title)}</h1>
 <div id="hud"><span id="hudStep"></span><span id="hudStars"></span><div id="hudLetters"></div></div>
 <canvas id="cv"></canvas>
-<div class="help">Sageti / WASD = misca, Space sau &#128163; = bomba. Sparge cutiile, evita dusmanii. Usile rosii = intrebari; cufarul auriu = scaparea.</div>
+<div class="help">Sageti / WASD = misca, Space sau &#128163; = bomba. Sparge cutiile (uneori cad bonusuri: &#128293; raza, &#128163; bombe in plus), evita dusmanii. Usile rosii = intrebari; cufarul auriu = scaparea.</div>
 <div id="dpad"><button data-d="L" aria-label="Stanga">&#9664;</button><button data-d="U" aria-label="Sus">&#9650;</button><button data-d="D" aria-label="Jos">&#9660;</button><button data-d="R" aria-label="Dreapta">&#9654;</button><button id="btnBomb" aria-label="Pune bomba">&#128163;</button></div>
 <div id="goOverlay"><div id="goCard"><div id="goMsg"></div><button id="goRestart">Incearca din nou</button></div></div>
 ${SNIP.modalHtml}
@@ -1062,12 +1062,37 @@ window.__seed = __seed;
 function makePRNG(seed){ var s = seed >>> 0; return function(){ s |= 0; s = (s + 0x6d2b79f5) | 0; var t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 var rng = makePRNG(__seed);
 
+/* ----- Efecte sonore arcade (WebAudio local; deblocat de gesturile din iframe) -----
+   beep(ok) din libJS ramane pentru raspuns corect/gresit; sfx() adauga bomba/explozie/powerup. */
+function sfx(type){
+  try {
+    var actx = sfx.ctx || (sfx.ctx = new (window.AudioContext || window.webkitAudioContext)());
+    if (actx.state === 'suspended') actx.resume();
+    var t = actx.currentTime;
+    function tone(wave, f0, f1, dur, vol){ var o = actx.createOscillator(), g = actx.createGain(); o.type = wave; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02); }
+    if (type === 'bomb'){ tone('square', 440, 150, 0.1, 0.07); }
+    else if (type === 'explosion'){
+      var dur = 0.45, sr = actx.sampleRate, buf = actx.createBuffer(1, Math.floor(sr * dur), sr), data = buf.getChannelData(0);
+      for (var i = 0; i < data.length; i++){ var k = 1 - i / data.length; data[i] = (Math.random() * 2 - 1) * k * k; }
+      var src = actx.createBufferSource(); src.buffer = buf;
+      var lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(1100, t); lp.frequency.exponentialRampToValueAtTime(180, t + dur);
+      var g = actx.createGain(); g.gain.setValueAtTime(0.38, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+      src.connect(lp); lp.connect(g); g.connect(actx.destination); src.start(t);
+      tone('sine', 130, 42, 0.34, 0.3);
+    }
+    else if (type === 'enemy'){ tone('square', 200, 520, 0.14, 0.08); }
+    else if (type === 'powerup'){ var fs = [523, 659, 784, 1047]; for (var p = 0; p < fs.length; p++){ var o = actx.createOscillator(), gg = actx.createGain(); o.type = 'triangle'; o.frequency.value = fs[p]; gg.gain.setValueAtTime(0.08, t + p * 0.06); gg.gain.exponentialRampToValueAtTime(0.0008, t + p * 0.06 + 0.13); o.connect(gg); gg.connect(actx.destination); o.start(t + p * 0.06); o.stop(t + p * 0.06 + 0.15); } }
+    else if (type === 'death'){ tone('sawtooth', 330, 55, 0.5, 0.12); }
+  } catch (e) {}
+}
+
 var GW = 15, GH = 13, TS = 36;
 var T_FLOOR = 0, T_WALL = 1, T_BOX = 2, T_DOOR = 3, T_CHEST = 4;
-var BOMB_TIMER = 2400, EXPLOSION_TIME = 500, EXPLOSION_RANGE = 3, ENEMY_INTERVAL = 600, RESPAWN_DELAY = 1500, INVINCIBLE_TIME = 2000, MAX_LIVES = 3;
+var BOMB_TIMER = 2400, EXPLOSION_TIME = 500, BASE_RANGE = 1, BASE_BOMBS = 1, POWERUP_CHANCE = 0.32, ENEMY_INTERVAL = 600, RESPAWN_DELAY = 1500, INVINCIBLE_TIME = 2000, MAX_LIVES = 3;
 var NUM_DOORS = N, NUM_ENEMIES = Math.max(2, Math.min(4, N + 1));
+var P_RANGE = 'range', P_BOMB = 'bomb';
 
-var map, player, enemies, bombs, explosions, lives, gameOver, gameWon, puzzleProgress, doorMeta, chestPos;
+var map, player, enemies, bombs, explosions, lives, gameOver, gameWon, puzzleProgress, doorMeta, chestPos, powerups, bombRange, maxBombs;
 var animFrame, lastTime = 0, enemyTimer = 0, invincibleTimer = 0, bombIdCounter = 0;
 
 var cv = el('cv'); cv.width = GW * TS; cv.height = GH * TS;
@@ -1107,7 +1132,7 @@ function init(){
   shuffle(ec);
   enemies = [];
   for (var i = 0; i < NUM_ENEMIES && i < ec.length; i++) enemies.push({ x: ec[i].x, y: ec[i].y, alive: true, id: i });
-  bombs = []; explosions = []; lives = MAX_LIVES; gameOver = false; gameWon = false; enemyTimer = 0; invincibleTimer = 0; lastTime = 0;
+  bombs = []; explosions = []; powerups = []; bombRange = BASE_RANGE; maxBombs = BASE_BOMBS; lives = MAX_LIVES; gameOver = false; gameWon = false; enemyTimer = 0; invincibleTimer = 0; lastTime = 0;
   if (!puzzleProgress) puzzleProgress = { doorsSolved: [] };
   for (var dd = 0; dd < doorMeta.length; dd++) if (puzzleProgress.doorsSolved[dd]) map[doorMeta[dd].y][doorMeta[dd].x] = T_FLOOR;
   hideGameOver();
@@ -1131,7 +1156,7 @@ el('goRestart').onclick = function(){ init(); };
 function updateHud(){
   var solved = puzzleProgress ? puzzleProgress.doorsSolved.filter(Boolean).length : 0;
   var alive = enemies ? enemies.filter(function(e){ return e.alive; }).length : 0;
-  el('hudStep').textContent = '\\u2764\\ufe0f ' + lives + '   \\ud83d\\udc7e ' + alive + '   \\ud83d\\udd13 ' + solved + '/' + N;
+  el('hudStep').textContent = '\\u2764\\ufe0f ' + lives + '   \\ud83d\\udc7e ' + alive + '   \\ud83d\\udd13 ' + solved + '/' + N + '   \\ud83d\\udca3' + (maxBombs || 1) + '   \\ud83d\\udd25' + (bombRange || 1);
   el('hudStars').textContent = totalStars + ' \\u2605';
   var hb = el('hudLetters'); hb.innerHTML = '';
   for (var j = 0; j < N; j++){ var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue; var s = document.createElement('span'); if (puzzleProgress && puzzleProgress.doorsSolved[j]){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?'; hb.appendChild(s); }
@@ -1140,27 +1165,47 @@ function updateHud(){
 /* ----- Bombe + explozii în lanț ----- */
 function placeBomb(){
   if (!player.alive || gameOver || gameWon || modalOpen()) return;
-  if (bombs.length >= 1) return;
+  if (bombs.length >= maxBombs) return;
+  for (var i = 0; i < bombs.length; i++) if (bombs[i].x === player.x && bombs[i].y === player.y) return;
   bombs.push({ x: player.x, y: player.y, timer: BOMB_TIMER, id: bombIdCounter++ });
+  sfx('bomb');
   updateHud();
 }
 function explodeBomb(bomb){
   bombs = bombs.filter(function(b){ return b.id !== bomb.id; });
   var cells = [{ x: bomb.x, y: bomb.y }];
+  var brokenBoxes = [];
   var dirs = [[1,0],[-1,0],[0,1],[0,-1]];
-  for (var d = 0; d < dirs.length; d++){ var dx = dirs[d][0], dy = dirs[d][1]; for (var r = 1; r <= EXPLOSION_RANGE; r++){ var cx = bomb.x + dx * r, cy = bomb.y + dy * r; if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) break; var t = map[cy][cx]; if (t === T_WALL) break; cells.push({ x: cx, y: cy }); if (t === T_BOX){ map[cy][cx] = T_FLOOR; break; } if (t === T_DOOR || t === T_CHEST) break; } }
+  for (var d = 0; d < dirs.length; d++){ var dx = dirs[d][0], dy = dirs[d][1]; for (var r = 1; r <= bombRange; r++){ var cx = bomb.x + dx * r, cy = bomb.y + dy * r; if (cx < 0 || cy < 0 || cx >= GW || cy >= GH) break; var t = map[cy][cx]; if (t === T_WALL) break; cells.push({ x: cx, y: cy }); if (t === T_BOX){ map[cy][cx] = T_FLOOR; brokenBoxes.push({ x: cx, y: cy }); break; } if (t === T_DOOR || t === T_CHEST) break; } }
   explosions.push({ cells: cells, endTime: performance.now() + EXPLOSION_TIME });
+  sfx('explosion');
   var chain = bombs.slice();
   for (var i = 0; i < chain.length; i++){ var bb = chain[i]; for (var c = 0; c < cells.length; c++) if (cells[c].x === bb.x && cells[c].y === bb.y){ explodeBomb(bb); break; } }
   checkExplosionHits(cells);
+  /* drop DUPA checkExplosionHits: altfel powerup-ul de pe celula cutiei e sters instant de filtrul de explozie */
+  for (var bx = 0; bx < brokenBoxes.length; bx++) maybeDropPowerup(brokenBoxes[bx].x, brokenBoxes[bx].y);
   updateHud();
 }
 function checkExplosionHits(cells){
-  for (var c = 0; c < cells.length; c++){ var cx = cells[c].x, cy = cells[c].y; for (var i = 0; i < enemies.length; i++) if (enemies[i].alive && enemies[i].x === cx && enemies[i].y === cy) enemies[i].alive = false; if (player.alive && !player.invincible && player.x === cx && player.y === cy) killPlayer(); }
+  for (var c = 0; c < cells.length; c++){ var cx = cells[c].x, cy = cells[c].y;
+    for (var i = 0; i < enemies.length; i++) if (enemies[i].alive && enemies[i].x === cx && enemies[i].y === cy){ enemies[i].alive = false; sfx('enemy'); }
+    powerups = powerups.filter(function(p){ return !(p.x === cx && p.y === cy); });
+    if (player.alive && !player.invincible && player.x === cx && player.y === cy) killPlayer();
+  }
+}
+function maybeDropPowerup(x, y){
+  if (rng() >= POWERUP_CHANCE) return;
+  powerups.push({ x: x, y: y, type: rng() < 0.5 ? P_RANGE : P_BOMB });
+}
+function pickupPowerup(){
+  for (var i = 0; i < powerups.length; i++) if (powerups[i].x === player.x && powerups[i].y === player.y){
+    if (powerups[i].type === P_RANGE) bombRange++; else maxBombs++;
+    powerups.splice(i, 1); sfx('powerup'); updateHud(); return;
+  }
 }
 function killPlayer(){
   if (!player.alive) return;
-  player.alive = false; lives--; updateHud();
+  player.alive = false; lives--; sfx('death'); updateHud();
   setTimeout(function(){ if (lives > 0) respawn(); else showGameOver(); }, RESPAWN_DELAY);
 }
 
@@ -1177,6 +1222,7 @@ function movePlayer(dir){
   if (t === T_DOOR){ for (var d = 0; d < doorMeta.length; d++) if (doorMeta[d].x === nx && doorMeta[d].y === ny){ if (!puzzleProgress.doorsSolved[d]) openPuzzle(d, onDoorSolved); return; } return; }
   if (t === T_CHEST){ player.x = nx; player.y = ny; gameWon = true; showFinal(); return; }
   player.x = nx; player.y = ny;
+  pickupPowerup();
   checkPlayerEnemyCollision();
 }
 function onDoorSolved(id){
@@ -1225,6 +1271,7 @@ function draw(now){
     else if (t === T_CHEST){ drawFloor(px, py, x, y, isExp); drawChest(px, py); }
     else drawFloor(px, py, x, y, isExp);
   }
+  for (var pu = 0; pu < powerups.length; pu++) drawPowerup(powerups[pu], now);
   for (var bi = 0; bi < bombs.length; bi++) drawBomb(bombs[bi], now);
   for (var en = 0; en < enemies.length; en++) if (enemies[en].alive) drawEnemy(enemies[en]);
   if (player.alive) drawPlayer(now);
@@ -1235,6 +1282,7 @@ function drawBox(px, py, isExp){ if (isExp){ ctx.fillStyle = '#f97316'; ctx.fill
 function drawDoor(px, py){ ctx.fillStyle = '#9f1239'; ctx.fillRect(px+3, py+2, TS-6, TS-4); ctx.fillStyle = '#e11d48'; ctx.fillRect(px+6, py+5, TS-12, TS-10); ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+TS/2-2, py+TS/2-2, 4, 7); }
 function drawChest(px, py){ ctx.fillStyle = '#92400e'; ctx.fillRect(px+4, py+8, TS-8, TS-14); ctx.fillStyle = '#f59e0b'; ctx.fillRect(px+4, py+8, TS-8, 8); ctx.fillStyle = '#fde68a'; ctx.fillRect(px+TS/2-3, py+11, 6, 10); ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+TS/2-2, py+13, 4, 4); }
 function drawBomb(bomb, now){ var px = bomb.x * TS, py = bomb.y * TS; var pulse = Math.sin(now / 150) * 0.3 + 0.7; ctx.fillStyle = 'rgba(30,10,10,' + pulse + ')'; ctx.beginPath(); ctx.arc(px + TS/2, py + TS/2, TS/2 - 4, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#f87171'; ctx.lineWidth = 2; ctx.stroke(); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + TS/2 + 4, py + 6); ctx.quadraticCurveTo(px + TS/2 + 10, py + 2, px + TS/2 + 7, py - 2); ctx.stroke(); }
+function drawPowerup(p, now){ var px = p.x * TS, py = p.y * TS, cx = px + TS/2, cy = py + TS/2, pulse = Math.sin(now / 200) * 0.12 + 0.88; var isR = p.type === P_RANGE; ctx.fillStyle = isR ? 'rgba(249,115,22,.25)' : 'rgba(59,130,246,.25)'; ctx.fillRect(px + 3, py + 3, TS - 6, TS - 6); ctx.fillStyle = isR ? '#f97316' : '#3b82f6'; ctx.beginPath(); ctx.arc(cx, cy, (TS/2 - 6) * pulse, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#fff'; if (isR){ ctx.beginPath(); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx + 5, cy + 6); ctx.lineTo(cx, cy + 2); ctx.lineTo(cx - 5, cy + 6); ctx.closePath(); ctx.fill(); } else { ctx.beginPath(); ctx.arc(cx, cy + 1, 5, 0, Math.PI*2); ctx.fill(); ctx.fillRect(cx - 1, cy - 8, 2, 4); } }
 function drawEnemy(e){ var px = e.x * TS, py = e.y * TS; ctx.fillStyle = '#dc2626'; ctx.fillRect(px+6, py+8, TS-12, TS-12); ctx.fillStyle = '#fff'; ctx.fillRect(px+9, py+12, 4, 4); ctx.fillRect(px+TS-13, py+12, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(px+10, py+13, 2, 2); ctx.fillRect(px+TS-12, py+13, 2, 2); ctx.fillStyle = '#b91c1c'; ctx.fillRect(px+8, py+TS-8, 4, 5); ctx.fillRect(px+TS-12, py+TS-8, 4, 5); }
 function drawPlayer(now){ var px = player.x * TS, py = player.y * TS; if (player.invincible && Math.floor(now / 100) % 2 === 0) return; ctx.fillStyle = CFG.color || '#6d28d9'; ctx.fillRect(px+6, py+5, TS-12, TS-10); ctx.fillStyle = '#fff'; ctx.fillRect(px+10, py+10, 4, 4); ctx.fillRect(px+TS-14, py+10, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(px+11, py+11, 2, 2); ctx.fillRect(px+TS-13, py+11, 2, 2); ctx.fillStyle = '#fff'; ctx.fillRect(px+11, py+TS-12, TS-22, 3); }
 
@@ -1254,6 +1302,10 @@ window.__game = {
   get enemiesCount(){ return enemies ? enemies.filter(function(e){ return e.alive; }).length : 0; },
   get puzzleProgress(){ return puzzleProgress; },
   get bombs(){ return bombs ? bombs.slice() : []; },
+  get powerups(){ return powerups ? powerups.slice() : []; },
+  get bombRange(){ return bombRange; },
+  get maxBombs(){ return maxBombs; },
+  dropPowerupAt: function(x, y, type){ powerups.push({ x: x, y: y, type: type || P_RANGE }); },
   get gameOver(){ return gameOver; },
   get gameWon(){ return gameWon; },
   get player(){ return player ? { x: player.x, y: player.y, alive: player.alive, invincible: player.invincible } : null; },

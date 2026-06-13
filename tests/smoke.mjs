@@ -1190,4 +1190,59 @@ test.describe('Campanie E2E @campanie', () => {
       expect(errors, errors.join('\n')).toHaveLength(0);
     });
 
+  test('arcade bomberman — raza initiala 1 + powerup-uri (drop la cutie, pickup creste raza/bombe) @regresie',
+    async ({ page }) => {
+      const errors = trackErrors(page);
+      await page.goto(fileURL('exemplu-arcade.html'));
+      await page.waitForFunction(() => typeof window.__game !== 'undefined', { timeout: 5000 });
+      await page.evaluate(() => window.__game.restartWithSeed(11));
+
+      // Raza initiala = 1, max bombe = 1
+      const base = await page.evaluate(() => ({ r: window.__game.bombRange, m: window.__game.maxBombs }));
+      expect(base.r, 'raza initiala trebuie sa fie 1').toBe(1);
+      expect(base.m, 'numar bombe initial trebuie sa fie 1').toBe(1);
+
+      // Raza 1: cutie la distanta 2 ramane intacta (player mutat departe de explozie)
+      await page.evaluate(() => {
+        window.__game.teleportPlayer(1, 1);
+        window.__game.setTile(2, 1, 2); window.__game.setTile(3, 1, 2);
+        window.__game.placeBomb(); window.__game.teleportPlayer(11, 11); window.__game.explodeAllBombs();
+      });
+      expect(await page.evaluate(() => window.__game.getTile(2, 1)), 'cutia la distanta 1 trebuie spartá').toBe(0);
+      expect(await page.evaluate(() => window.__game.getTile(3, 1)), 'raza 1: cutia la distanta 2 trebuie intactá').toBe(2);
+
+      // Drop: peste multe cutii sparte apar powerup-uri care SUPRAVIETUIESC exploziei care le-a creat.
+      // (Bug-ul prins: powerup-ul cadea pe celula cutiei si checkExplosionHits il stergea instant.)
+      const dropRounds = await page.evaluate(() => {
+        window.__game.restartWithSeed(11);
+        let rounds = 0;
+        for (let i = 0; i < 60; i++) {
+          window.__game.teleportPlayer(1, 1); window.__game.setTile(2, 1, 2);
+          window.__game.placeBomb(); window.__game.teleportPlayer(11, 11); window.__game.explodeAllBombs();
+          // ridica orice powerup ramas (mut player pe el) ca sa nu fie sters de explozia urmatoare
+          window.__game.powerups.slice().forEach(p => { if (p.x === 2 && p.y === 1) rounds++; window.__game.teleportPlayer(p.x, p.y); window.__game.movePlayer('R'); window.__game.movePlayer('L'); });
+        }
+        return rounds;
+      });
+      expect(dropRounds, 'niciun powerup nu a supravietuit pe celula cutiei sparte').toBeGreaterThan(0);
+
+      // Pickup: range creste bombRange, bomb creste maxBombs; powerup consumat
+      const pick = await page.evaluate(() => {
+        window.__game.restartWithSeed(11);
+        window.__game.setTile(2, 1, 0); window.__game.setTile(3, 1, 0);
+        window.__game.teleportPlayer(1, 1);
+        window.__game.dropPowerupAt(2, 1, 'range'); window.__game.movePlayer('R');
+        const a = { r: window.__game.bombRange, pu: window.__game.powerups.length };
+        window.__game.dropPowerupAt(3, 1, 'bomb'); window.__game.movePlayer('R');
+        const c = { m: window.__game.maxBombs, pu: window.__game.powerups.length };
+        return { a, c };
+      });
+      expect(pick.a.r, 'pickup range nu a crescut bombRange').toBe(2);
+      expect(pick.a.pu, 'powerup range nu a fost consumat').toBe(0);
+      expect(pick.c.m, 'pickup bomb nu a crescut maxBombs').toBe(2);
+      expect(pick.c.pu, 'powerup bomb nu a fost consumat').toBe(0);
+
+      expect(errors, errors.join('\n')).toHaveLength(0);
+    });
+
 });

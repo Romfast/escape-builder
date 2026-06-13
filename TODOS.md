@@ -20,6 +20,20 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
 **PR2 livrat (2026-06-13):** audio camere `651025b`, voce `da93d84`, unificare `ab11089`, a11y (acest commit).
 Rămas din Etapa 2: D7 (migrare classic pe libJS+SNIP) + muzică timer (T10) + Adventure Mode v0.
 
+### [x] Bomberman polish (feedback user 2026-06-13) — LIVRAT
+Trei probleme raportate + o lipsă, toate în `gameArcade` (`escape-builder.html`):
+- **Fără sunete în joc** → adăugat `sfx(type)` (WebAudio local în iframe, deblocat de gesturile din
+  arcade): `bomb` (plasare), `explosion` (zgomot filtrat lowpass + thump sine), `enemy` (dușman ucis),
+  `powerup` (arpegiu), `death`. `beep(ok)` din libJS rămâne pt. răspuns corect/greșit.
+- **Rază prea mare** → `EXPLOSION_RANGE=3` const → `bombRange` variabil pornind de la `BASE_RANGE=1`
+  (Bomberman clasic). Similar `maxBombs` de la `BASE_BOMBS=1`.
+- **Fără powerup-uri** → la spargerea unei cutii, șansă `POWERUP_CHANCE=0.32` să cadă 🔥 (rază+1) sau
+  💣 (bombe+1). Ridicate mergând pe ele; persistă peste respawn, reset la `init()`. HUD arată 💣/🔥.
+- **Bug prins** (drop=0 inițial): powerup-ul cădea pe celula cutiei, iar `checkExplosionHits` îl ștergea
+  instant ca fiind „pe o celulă de explozie". Fix: colectez `brokenBoxes`, dau drop DUPĂ `checkExplosionHits`.
+Teste noi: smoke #27 (rază 1 + drop supraviețuiește + pickup crește rază/bombe). Hooks `__game`:
+`powerups`/`bombRange`/`maxBombs`/`dropPowerupAt`. Verificat: smoke 27/27 + live (drop ~30%, 0 erori).
+
 ---
 
 ## ▶ BOARD ACTIV — Iterația 2 (Adventure Mode / restyle)

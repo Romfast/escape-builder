@@ -20,8 +20,8 @@ sursa de adevăr tehnică pentru agenți.
 python3 -m http.server 8000
 
 # Teste (Playwright; fără package.json commitat — vezi tests/AGENTS.md):
-npx playwright test tests/smoke.mjs                    # suita completă: 26/26
-npx playwright test tests/smoke.mjs --grep @regresie   # regresie: 14
+npx playwright test tests/smoke.mjs                    # suita completă: 27/27
+npx playwright test tests/smoke.mjs --grep @regresie   # regresie: 15
 npx playwright test tests/smoke.mjs --grep @campanie   # campanie E2E: 12
 ```
 
