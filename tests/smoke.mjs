@@ -945,27 +945,48 @@ test.describe('Campanie E2E @campanie', () => {
     });
 
   // ─────────────────────────────────────────────────────────────────────
-  // Test 9 (S4): Audio — AudioContext deblocat la "Incepe aventura" (S1)
+  // Test 9 (S4+): Audio — deblocare ctx pe PRIMUL gest (orice), nu doar btn-start.
+  // NB: headless Chromium creeaza AudioContext direct 'running' (ignora autoplay
+  // policy), deci "ctx==running" e trivial. Testam WIRING-ul real al deblocarii:
+  // (A) primul gest oarecare (tastatura, ca la resume) deblocheaza fara btn-start;
+  // (B) beep() se auto-vindeca dintr-un ctx readus in 'suspended'.
   // ─────────────────────────────────────────────────────────────────────
-  test('audio — AudioContext deblocat la Incepe aventura (S1) @campanie',
+  test('audio — deblocare pe primul gest + beep self-heal (S1) @campanie',
     async ({ page }) => {
       const cfg = campaignCfg(3, 'classic');
       const tmpPath = await writeCampaignHtml(page, cfg, 'audio');
       const gp = await page.context().newPage();
       try {
         await gp.goto('file://' + tmpPath);
-        // Inainte de gest: ctx inexistent (creat lazy)
+        // Inainte de orice gest: ctx inexistent (creat lazy)
         const before = await gp.evaluate(
           () => (window.beep && window.beep._ctx) ? window.beep._ctx.state : 'NO_CTX'
         );
         expect(before, 'ctx nu trebuie sa existe inainte de gest').toBe('NO_CTX');
-        // Gestul pe parinte deblocheaza ctx-ul
-        await gp.locator('#btn-start').click();
-        await gp.waitForTimeout(200);
-        const after = await gp.evaluate(
+
+        // (A) Cale RESUME: un gest de tastatura (mers pe harta), FARA btn-start,
+        // trebuie sa creeze+deblocheze ctx-ul prin listenerul global one-time.
+        await gp.keyboard.press('ArrowDown');
+        await gp.waitForTimeout(100);
+        const afterKey = await gp.evaluate(
           () => (window.beep && window.beep._ctx) ? window.beep._ctx.state : 'NO_CTX'
         );
-        expect(after, 'ctx trebuie running dupa Incepe aventura').toBe('running');
+        expect(afterKey, 'gestul de tastatura trebuie sa deblocheze ctx (cale resume)').toBe('running');
+
+        // (B) beep() trebuie sa produca oscilatoare si sa reia un ctx suspendat.
+        const heal = await gp.evaluate(async () => {
+          await window.beep._ctx.suspend();
+          const mid = window.beep._ctx.state;        // 'suspended'
+          let osc = 0;
+          const orig = window.beep._ctx.createOscillator.bind(window.beep._ctx);
+          window.beep._ctx.createOscillator = function () { osc++; return orig(); };
+          window.beep(true);
+          await new Promise(r => setTimeout(r, 50));
+          return { mid, osc, end: window.beep._ctx.state };
+        });
+        expect(heal.mid, 'ctx trebuie suspendat inainte de self-heal').toBe('suspended');
+        expect(heal.osc, 'beep trebuie sa creeze oscilatoare').toBeGreaterThan(0);
+        expect(heal.end, 'beep trebuie sa reia ctx-ul suspendat').toBe('running');
       } finally {
         await gp.close();
         try { unlinkSync(tmpPath); } catch (_) {}

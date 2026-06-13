@@ -16,13 +16,18 @@ Direcția cerută de user (decizii confirmate, vezi `HANDOFF.md`). Model hibrid 
 părțile grele se prototipează în PARALEL în `scratch/`, verificate jucabile, apoi integrator le
 portează în `escape-builder.html` (un singur fișier, integrare secvențială).
 
-- [x] **S1 — fix sunet campanie** *(GATA, verificat în browser)*
-      Cauză reală: orchestratorul crea `beep._ctx` lazy la primul `parent.beep()` din iframe;
-      gestul din iframe NU deblochează AudioContext-ul părintelui → ctx `suspended` → tăcere.
-      (Ipoteza HANDOFF „beep nedefinit" era greșită; `beep` e la `escape-builder.html:1725`.)
-      Fix: deblocare ctx în handler-ul `btn-start` (gest direct pe părinte), `escape-builder.html:1928`.
-      Verificat: `scratch/verify-audio-s1.mjs` → ctx `running` după start (era `NO_CTX`). Smoke 21/21.
-      TODO la S4: portează asertarea `beep._ctx.state==='running'` în `tests/smoke.mjs`.
+- [x] **S1 — fix sunet campanie** *(GATA — REVENIT: fix-ul inițial era incomplet, user raporta tăcere)*
+      Cauză reală: gestul din iframe NU deblochează AudioContext-ul părintelui → ctx `suspended` → tăcere.
+      Fix v1 (incomplet): deblocare DOAR în handler-ul `btn-start`. Lacună: calea de **resume**
+      (reload mid-campanie, `escape-builder.html:2199`) intră direct pe hartă FĂRĂ btn-start → ctx
+      nedeblocat → camere mute. Plus `resume()` singur nu ajunge pe iOS Safari.
+      Fix v2 (real): `unlockAudio()` + listener GLOBAL one-time pe primul gest (`pointerdown`+`keydown`,
+      capture) — acoperă fresh ȘI resume (mers pe hartă = keydown pe părinte); buffer silențios
+      iOS-safe; `beep()` se auto-vindecă dacă ctx redevine `suspended`. `escape-builder.html:1893`.
+      **Lecție testare:** headless Chromium creează ctx direct `running` (ignoră autoplay policy) →
+      vechiul test „ctx running" trecea trivial, NU putea prinde tăcerea. Test nou (smoke #9):
+      gest tastatură FĂRĂ btn-start → running (cale resume) + beep self-heal din ctx suspendat.
+      Verificat: smoke 24/24 + live MCP (ArrowDown singur deblochează). Demo-uri regenerate.
 - [x] **S2a — prototip Bomberman complet** → `scratch/bomberman-proto.html` (GATA, 8/8 verificat de mine)
       Grid 15×13, bombe timer 2.4s + explozii lanț, cutii distructibile, AI dușmani BFS urmărire,
       3 vieți + respawn cu progres puzzle PĂSTRAT (stare separată), PRNG seedat (`window.__seed`),

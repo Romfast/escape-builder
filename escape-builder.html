@@ -1878,6 +1878,7 @@ function doorHtml(style, isLast, isStuck){
 function beep(ok){
   try{
     var ctx=beep._ctx||(beep._ctx=new(window.AudioContext||window.webkitAudioContext)());
+    if(ctx.state==='suspended') ctx.resume(); /* safety: ctx poate fi suspendat din nou */
     var t=ctx.currentTime; var fs=ok?[523,784]:[196];
     fs.forEach(function(f,k){
       var o=ctx.createOscillator(),g=ctx.createGain();
@@ -1889,6 +1890,28 @@ function beep(ok){
     });
   }catch(e){}
 }
+
+/* ----- Deblocare audio (D2) — primul gest pe părinte creează+deblochează ctx-ul.
+   Necesar pe TOATE căile, nu doar btn-start: la resume (reload mid-campanie) se intră
+   direct pe hartă fără btn-start, iar camerele cheamă parent.beep() din iframe (gestul
+   din iframe NU deblochează ctx-ul părintelui). Pe iOS Safari resume() singur nu ajunge
+   → redăm și un buffer silențios în gest. Listener one-time, se auto-elimină. */
+function unlockAudio(){
+  try{
+    var c=beep._ctx||(beep._ctx=new(window.AudioContext||window.webkitAudioContext)());
+    if(c.state==='suspended') c.resume();
+    var b=c.createBuffer(1,1,22050),s=c.createBufferSource();
+    s.buffer=b; s.connect(c.destination); s.start(0);
+  }catch(e){}
+}
+var _audioUnlocked=false;
+function _onFirstGesture(){
+  if(_audioUnlocked) return; _audioUnlocked=true; unlockAudio();
+  document.removeEventListener('pointerdown',_onFirstGesture,true);
+  document.removeEventListener('keydown',_onFirstGesture,true);
+}
+document.addEventListener('pointerdown',_onFirstGesture,true);
+document.addEventListener('keydown',_onFirstGesture,true);
 
 /* ----- parent.* API ----- */
 
@@ -2170,9 +2193,7 @@ document.getElementById('intro-title').textContent = MASTER.title;
 document.getElementById('intro-story').textContent = (MASTER.player?'Salut, '+MASTER.player+'! ':'')+MASTER.story;
 document.getElementById('intro-promise').textContent = N+' camere \\u00b7 ${nStyles} stiluri \\u00b7 1 cuvânt magic';
 document.getElementById('btn-start').onclick = function(){
-  /* Deblochează AudioContext-ul AICI (gest direct pe părinte) — camerele cheamă
-     parent.beep() din iframe, iar gestul din iframe NU deblochează ctx-ul părintelui. */
-  try{ var c=beep._ctx||(beep._ctx=new(window.AudioContext||window.webkitAudioContext)()); if(c.state==='suspended') c.resume(); }catch(e){}
+  unlockAudio(); /* gest direct pe părinte (handlerul global prinde și el, dar e idempotent) */
   clearProgress(); owResetPlayer(); showOverworld(0);
 };
 
