@@ -1056,6 +1056,61 @@ test.describe('Campanie E2E @campanie', () => {
     });
 
   // ─────────────────────────────────────────────────────────────────────
+  // Test 9c (PR2): A11y — tinte tap >=44px, aria pe progres+dpad, reduced-motion
+  // (Playwright emuleaza prefers-reduced-motion → asertam faptic ca animatiile
+  // decorative sunt neutralizate).
+  // ─────────────────────────────────────────────────────────────────────
+  test('a11y — tap>=44px + aria progres/dpad + reduced-motion @campanie',
+    async ({ page }) => {
+      const cfg = campaignCfg(3, 'classic');
+      const tmpPath = await writeCampaignHtml(page, cfg, 'a11y');
+      const gp = await page.context().newPage();
+      try {
+        await gp.emulateMedia({ reducedMotion: 'reduce' });
+        await gp.goto('file://' + tmpPath);
+
+        // Aria pe progres: container + dot initial cu stare
+        await expect(gp.locator('#dots')).toHaveAttribute('role', 'group');
+        const dot0 = await gp.locator('#dot-0').getAttribute('aria-label');
+        expect(dot0).toContain('Camera 1 din 3');
+        expect(dot0).toContain('neinceputa');
+
+        // Start → harta; dpad cu aria-label + tinte tap >=44px
+        await gp.locator('#btn-start').click();
+        await waitOverworld(gp);
+        for (const [d, label] of [['U', 'Sus'], ['D', 'Jos'], ['L', 'Stanga'], ['R', 'Dreapta']]) {
+          const btn = gp.locator(`#ow-dpad button[data-d="${d}"]`);
+          await expect(btn).toHaveAttribute('aria-label', label);
+          const box = await btn.boundingBox();
+          expect(box.width, `dpad ${d} latime`).toBeGreaterThanOrEqual(44);
+          expect(box.height, `dpad ${d} inaltime`).toBeGreaterThanOrEqual(44);
+        }
+
+        // Reduced-motion: confetti decorativ -> display:none (proba directa pe regula CSS)
+        const confettiDisplay = await gp.evaluate(() => {
+          const probe = document.createElement('div');
+          probe.className = 'confetti';
+          document.body.appendChild(probe);
+          const disp = getComputedStyle(probe).display;
+          probe.remove();
+          return disp;
+        });
+        expect(confettiDisplay, 'confetti trebuie ascuns sub reduced-motion').toBe('none');
+
+        // Dot devine 'rezolvata' dupa ce camera 0 e gata (verifica aria dinamic)
+        await enterRoom(gp, 0);
+        await solveRoom(gp, 'classic', 'r1');
+        await waitOverworld(gp);
+        await expect.poll(
+          () => gp.locator('#dot-0').getAttribute('aria-label')
+        ).toContain('rezolvata');
+      } finally {
+        await gp.close();
+        try { unlinkSync(tmpPath); } catch (_) {}
+      }
+    });
+
+  // ─────────────────────────────────────────────────────────────────────
   // Test 10 (S4): Overworld — mers cu tastatura + iesire blocata pana la final
   // ─────────────────────────────────────────────────────────────────────
   test('overworld — mers cu tastatura + iesire blocata pana la final @campanie',

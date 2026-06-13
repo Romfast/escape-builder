@@ -519,6 +519,7 @@ function gameClassic(cfg) {
   @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
   @media (prefers-reduced-motion: reduce) {
     .screen.on, .tile.won, .bigword span, .shake { animation: none; }
+    .confetti { display: none !important; }
     .progress i { transition: none; }
   }
 </style>
@@ -773,7 +774,8 @@ SNIP.baseCss = `
   .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }
   @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
   .shake { animation: shake .4s ease; }
-  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }`;
+  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }
+  @media (prefers-reduced-motion: reduce){ .confetti{ display:none !important; } .shake{ animation:none !important; } }`;
 
 SNIP.modalCss = `
   #mOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.72); z-index: 20; align-items: center; justify-content: center; padding: 16px; }
@@ -850,6 +852,7 @@ SNIP.finalCss = `
   #fOverlay .fword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0; }
   #fOverlay .fword span { width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards; }
   @keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+  @media (prefers-reduced-motion: reduce){ #fOverlay .fword span{ animation:none !important; } }
   #fOverlay p { color: rgba(255,255,255,.8); line-height: 1.5; }
   #fOverlay button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; }`;
 
@@ -1044,7 +1047,7 @@ ${SNIP.baseCss}${SNIP.modalCss}${SNIP.finalCss}
 <div id="hud"><span id="hudStep"></span><span id="hudStars"></span><div id="hudLetters"></div></div>
 <canvas id="cv"></canvas>
 <div class="help">Sageti / WASD = misca, Space sau &#128163; = bomba. Sparge cutiile, evita dusmanii. Usile rosii = intrebari; cufarul auriu = scaparea.</div>
-<div id="dpad"><button data-d="L">&#9664;</button><button data-d="U">&#9650;</button><button data-d="D">&#9660;</button><button data-d="R">&#9654;</button><button id="btnBomb">&#128163;</button></div>
+<div id="dpad"><button data-d="L" aria-label="Stanga">&#9664;</button><button data-d="U" aria-label="Sus">&#9650;</button><button data-d="D" aria-label="Jos">&#9660;</button><button data-d="R" aria-label="Dreapta">&#9654;</button><button id="btnBomb" aria-label="Pune bomba">&#128163;</button></div>
 <div id="goOverlay"><div id="goCard"><div id="goMsg"></div><button id="goRestart">Incearca din nou</button></div></div>
 ${SNIP.modalHtml}
 ${SNIP.finalHtml}
@@ -1649,7 +1652,7 @@ body {
 #ow-hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 13px; color: rgba(255,255,255,.72); z-index: 4; pointer-events: none; padding: 0 8px; }
 #ow-toast { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(0,0,0,.72); padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 700; color: var(--c-gold); z-index: 4; opacity: 0; transition: opacity .3s; pointer-events: none; }
 #ow-toast.show { opacity: 1; }
-#ow-dpad { position: absolute; right: 10px; bottom: 10px; display: grid; grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 42px); gap: 4px; z-index: 5; }
+#ow-dpad { position: absolute; right: 10px; bottom: 10px; display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); gap: 4px; z-index: 5; }
 #ow-dpad button { border: 1px solid #4a3590; background: rgba(34,22,67,.85); color: #cdc3f0; border-radius: 9px; font-size: 16px; cursor: pointer; }
 #ow-dpad button:active { background: var(--accent); }
 #ow-dpad .sp { visibility: hidden; }
@@ -1669,7 +1672,12 @@ body {
   100% { transform: scale(.85) rotateY(-90deg);  opacity: 0; }
 }
 .opening { animation: door-open .25s cubic-bezier(.4,0,1,1) forwards; transform-origin: left center; perspective: 600px; }
-@media (prefers-reduced-motion: reduce) { .opening { animation: none; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .opening { animation: none; opacity: 0; }
+  #fin-word span { animation: none !important; }
+  .door-terminal .dt-cur { animation: none !important; }
+  .confetti { display: none !important; }
+}
 /* Classic */
 .door-classic {
   width: 88px; height: 124px; position: relative;
@@ -1774,7 +1782,7 @@ body {
   <span id="chrome-title">${esc(cfg.title)}</span>
   <div class="sp"></div>
   <button id="btn-voice" type="button" aria-label="Naratiune vocala" hidden>&#128266;</button>
-  <div id="dots"></div>
+  <div id="dots" role="group" aria-label="Progres camere"></div>
 </div>
 
 <div id="room-wrap">
@@ -1792,10 +1800,10 @@ body {
       <div id="ow-world"></div>
       <div id="ow-toast"></div>
       <div id="ow-hint"></div>
-      <div id="ow-dpad">
-        <button class="sp"></button><button data-d="U">&#9650;</button><button class="sp"></button>
-        <button data-d="L">&#9664;</button><button class="sp"></button><button data-d="R">&#9654;</button>
-        <button class="sp"></button><button data-d="D">&#9660;</button><button class="sp"></button>
+      <div id="ow-dpad" role="group" aria-label="Deplasare pe harta">
+        <button class="sp" aria-hidden="true" tabindex="-1"></button><button data-d="U" aria-label="Sus">&#9650;</button><button class="sp" aria-hidden="true" tabindex="-1"></button>
+        <button data-d="L" aria-label="Stanga">&#9664;</button><button class="sp" aria-hidden="true" tabindex="-1"></button><button data-d="R" aria-label="Dreapta">&#9654;</button>
+        <button class="sp" aria-hidden="true" tabindex="-1"></button><button data-d="D" aria-label="Jos">&#9660;</button><button class="sp" aria-hidden="true" tabindex="-1"></button>
       </div>
     </div>
   </div>
@@ -1872,11 +1880,17 @@ function buildDots(){
   for(var i=0;i<N;i++){
     var s = document.createElement('span');
     s.id = 'dot-'+i;
-    s.setAttribute('aria-label','Camera '+(i+1)+' din '+N);
+    s.setAttribute('role','img');
     d.appendChild(s);
+    setDot(i,''); /* setează aria-label inițial (neînceput) */
   }
 }
-function setDot(i,cls){ var d=document.getElementById('dot-'+i); if(d) d.className=cls; }
+function setDot(i,cls){
+  var d=document.getElementById('dot-'+i); if(!d) return;
+  d.className=cls;
+  var st = cls==='done' ? 'rezolvata' : (cls==='active' ? 'in curs' : 'neinceputa');
+  d.setAttribute('aria-label','Camera '+(i+1)+' din '+N+': '+st);
+}
 
 /* ----- Ușa coridorului (§Design pct.7) ----- */
 function doorHtml(style, isLast, isStuck){

@@ -15,7 +15,10 @@ Referință plan complet: `~/.gstack/projects/romfast-escape-builder/ceo-plans/2
   (acoperă resume), nu doar btn-start; test rescris (headless crea ctx `running` trivial).
 - [x] **Narațiune vocală (D10)** — LIVRAT (vezi §„Narațiune vocală" mai jos). Smoke 25/25.
 - [x] **Unificare contract `_campaign` la final** — `libJS.campaignDone()` (vezi §dedicată mai jos).
-- [ ] **Audit a11y motoare** (vezi §dedicată mai jos).
+- [x] **Audit a11y motoare** — LIVRAT (vezi §dedicată mai jos). Smoke 26/26.
+
+**PR2 livrat (2026-06-13):** audio camere `651025b`, voce `da93d84`, unificare `ab11089`, a11y (acest commit).
+Rămas din Etapa 2: D7 (migrare classic pe libJS+SNIP) + muzică timer (T10) + Adventure Mode v0.
 
 ---
 
@@ -123,13 +126,26 @@ Referință: planul §Etapa 2 pct. 1; D7.
 - După migrare: classic folosește `libJS.campaignDone()` + `SNIP` ca celelalte 4 → 5/5 uniform.
 - Necesită regresie manuală pe classic standalone (e demo-ul implicit, cel mai vizibil).
 
-### Audit a11y motoare existente (post-PR1, sub harness Playwright)
-- **Ținte tap ≥ 44px**: dpad arcade, butoane tf/choice, butonul "Trimite" din chat.
-- **Contrast ≥ 4.5:1**: text terminal dim (`#1f9c4a` pe `#04130a` — verifică), hint text clasic.
-- **`@media (prefers-reduced-motion: reduce)`**: dezactivează `pop`, `flip`, `flipin`, `shake`, `confetti`, `bin` — stările finale apar direct.
-- **Focus & Enter**: "Deschide ușa" (campanie) focusabil + Enter; dpad arcade accesibil cu keyboard.
-- **`aria-label` pe progres**: bara chrome din campanie (`aria-label="Camera X din Y"`).
-- Referință: §Design pct. 13 (TD5, PR2); D19 din plan.
+### [x] Audit a11y motoare existente — LIVRAT (sub harness Playwright)
+Auditat faptic (măsurat, nu presupus). Ce era DEJA OK (din restyle S3, nemodificat):
+- **Tap ≥44px**: arcade dpad 56×52, butoane classic 44/48, chat send/chip 44 — toate ✓.
+- **Contrast**: terminal `.dim` #2ecc71 pe #040f08 ≈ **9.4:1** ✓ (nota TODOS `#1f9c4a` era stale,
+  schimbat la S3); classic `button.hint` .55 alb pe card #1a0e3d ≈ **6:1** ✓. Niciun fix necesar.
+- **Focus & Enter**: butoane reale peste tot (Enter/Space nativ); arcade+overworld navigabile cu
+  săgeți (keydown pe document). „Deschide ușa" coridor = OBSOLET (overworld a înlocuit coridorul;
+  ușile se intră mergând cu tastatura → owCheckEnter).
+Ce am REPARAT:
+- **Tap**: overworld dpad era 42×42 → **44×44** (singura țintă sub prag).
+- **reduced-motion** (lacune reale): `.confetti` (display:none) în classic + SNIP.baseCss + campanie;
+  `flipin` final (SNIP.finalCss `#fOverlay .fword span` + campanie `#fin-word span`); `dt-blink`
+  (cursor ușă terminal) în campanie. `pop`/`flip`/`shake`/`bin`/`tile-pop`/`tp`/`door-glow`/`crt-flicker`
+  erau deja acoperite. NB: `flipin`/`pop` au `backwards` fill → `animation:none` le revine la starea
+  vizibilă (nu rămân ascunse — verificat).
+- **aria**: `#dots` `role=group`+label; fiecare dot `role=img` cu `aria-label` ce reflectă STAREA
+  (neînceputa/în curs/rezolvata) via `setDot`; dpad arcade+overworld au `aria-label` (Sus/Jos/Stânga/
+  Dreapta/Pune bomba); spacerele `.sp` overworld → `aria-hidden`+`tabindex=-1`.
+Test nou smoke #9c (`a11y — tap>=44px + aria + reduced-motion`, cu `emulateMedia reducedMotion`). 26/26.
+Referință: §Design pct. 13 (TD5, PR2); D19 din plan.
 
 ---
 
