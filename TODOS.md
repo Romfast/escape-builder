@@ -16,11 +16,13 @@ Direcția cerută de user (decizii confirmate, vezi `HANDOFF.md`). Model hibrid 
 părțile grele se prototipează în PARALEL în `scratch/`, verificate jucabile, apoi integrator le
 portează în `escape-builder.html` (un singur fișier, integrare secvențială).
 
-- [ ] **S1 — fix sunet campanie** *(prioritar, rapid)*
-      Reinvestighează ÎNTÂI: `beep` E deja definit la `escape-builder.html:1725` în orchestrator
-      (devine `window.beep` → `parent.beep` ar trebui să rezolve). Ipoteza veche din HANDOFF
-      (beep nedefinit) pare GREȘITĂ. Suspect real: AudioContext `suspended` până la gest user,
-      sau context creat înainte de click „Începe aventura". Confirmă cauza în browser înainte de fix.
+- [x] **S1 — fix sunet campanie** *(GATA, verificat în browser)*
+      Cauză reală: orchestratorul crea `beep._ctx` lazy la primul `parent.beep()` din iframe;
+      gestul din iframe NU deblochează AudioContext-ul părintelui → ctx `suspended` → tăcere.
+      (Ipoteza HANDOFF „beep nedefinit" era greșită; `beep` e la `escape-builder.html:1725`.)
+      Fix: deblocare ctx în handler-ul `btn-start` (gest direct pe părinte), `escape-builder.html:1928`.
+      Verificat: `scratch/verify-audio-s1.mjs` → ctx `running` după start (era `NO_CTX`). Smoke 21/21.
+      TODO la S4: portează asertarea `beep._ctx.state==='running'` în `tests/smoke.mjs`.
 - [ ] **S2a — prototip Bomberman complet** → `scratch/bomberman-proto.html`
       Standalone jucabil: dușmani cu AI urmărire, bombe plasabile + explozii în lanț, blocuri
       distructibile, pericole, vieți + game-over + respawn fără pierderea progresului puzzle,

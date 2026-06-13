@@ -1925,7 +1925,12 @@ function hideAll(){
 document.getElementById('intro-title').textContent = MASTER.title;
 document.getElementById('intro-story').textContent = (MASTER.player?'Salut, '+MASTER.player+'! ':'')+MASTER.story;
 document.getElementById('intro-promise').textContent = N+' camere \\u00b7 ${nStyles} stiluri \\u00b7 1 cuvânt magic';
-document.getElementById('btn-start').onclick = function(){ clearProgress(); mountRoom(0); };
+document.getElementById('btn-start').onclick = function(){
+  /* Deblochează AudioContext-ul AICI (gest direct pe părinte) — camerele cheamă
+     parent.beep() din iframe, iar gestul din iframe NU deblochează ctx-ul părintelui. */
+  try{ var c=beep._ctx||(beep._ctx=new(window.AudioContext||window.webkitAudioContext)()); if(c.state==='suspended') c.resume(); }catch(e){}
+  clearProgress(); mountRoom(0);
+};
 
 buildDots();
 
