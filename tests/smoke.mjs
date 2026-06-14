@@ -1695,22 +1695,29 @@ test.describe('Share: link + QR + player @share', () => {
     expect(errors).toHaveLength(0);
   });
 
-  test('@share playerHTML() genereaza HTML cu inflate + script run + TPL', async ({ page }) => {
+  test('@share playerHTML() genereaza HTML cu inflate + motor inainte de boot + TPL', async ({ page }) => {
     const errors = trackErrors(page);
     await page.goto(fileURL('escape-builder.html'));
     const result = await page.evaluate(() => {
       if (typeof playerHTML !== 'function') return { err: 'playerHTML missing' };
       const html = playerHTML();
+      /* Motorul (window.__runGame) trebuie definit ÎNAINTE ca boot-ul să-l apeleze, ca să nu
+       * existe race de parsare (Brave dădea „motor lipsă" când await-ul din inflate se rezolva
+       * pe microtask înainte ca scriptul motor să fie parsat). */
       return {
         hasInflate: html.includes('inflateFromBase64url'),
-        hasRunScript: html.includes('text/plain'),
+        hasRunGame: html.includes('window.__runGame=function'),
+        noLegacyInjection: !html.includes('text/plain'),
+        engineBeforeBoot: html.indexOf('window.__runGame=function') < html.indexOf('inflateFromBase64url(h)'),
         hasTPL: html.includes('var TPL'),
         len: html.length
       };
     });
     expect(result.err, 'error').toBeUndefined();
     expect(result.hasInflate, 'inflate helper').toBe(true);
-    expect(result.hasRunScript, 'text/plain run script').toBe(true);
+    expect(result.hasRunGame, 'window.__runGame definit').toBe(true);
+    expect(result.noLegacyInjection, 'fara injectie dinamica text/plain').toBe(true);
+    expect(result.engineBeforeBoot, 'motorul definit inaintea boot-ului').toBe(true);
     expect(result.hasTPL, 'var TPL').toBe(true);
     expect(result.len).toBeGreaterThan(5000);
     expect(errors).toHaveLength(0);

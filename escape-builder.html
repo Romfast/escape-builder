@@ -2068,22 +2068,41 @@ roomReady();
  */
 
 function campaignShell({ tplJson, masterExpr, titleExpr, nStyles, bootMode }) {
+  /* bootMode 'hash': motorul se DEFINEȘTE întâi (window.__runGame), boot-ul îl apelează după.
+   * Ordinea garantează că __runGame există când boot-ul rulează — fără injecție dinamică și fără
+   * race de parsare (await-ul din inflate se poate rezolva pe microtask înainte ca un <script>
+   * ulterior să fie parsat; în Brave asta dădea „motor lipsă"). */
   const _scriptOpen = bootMode === 'hash'
     ? `<script>
+window.__runGame=function(){
+var MASTER=window.MASTER;`
+    : `<script>
+var TPL    = ${tplJson};
+var MASTER = ${masterExpr};`;
+
+  /* Închiderea: pentru 'hash' închide funcția __runGame, apoi emite scriptul de boot
+   * (inflate hash → window.MASTER → window.__runGame()). Pentru 'inline' doar închide scriptul. */
+  const _scriptClose = bootMode === 'hash'
+    ? `};
+<\/script>
+<script>
 ${SNIP.compressJs}
 var TPL    = ${tplJson};
 (async function(){
   var h=location.hash.slice(1);
   if(!h){document.getElementById('intro-title').textContent='Niciun joc în acest link.';return;}
-  window.MASTER=JSON.parse(await inflateFromBase64url(h));
-  var s=document.createElement('script');s.textContent=document.getElementById('run').textContent;document.body.appendChild(s);
+  try { window.MASTER=JSON.parse(await inflateFromBase64url(h)); }
+  catch(e){ document.getElementById('intro-title').textContent='Link invalid sau corupt. Regenerează QR-ul din builder.'; return; }
+  if(typeof window.__runGame!=='function'){document.getElementById('intro-title').textContent='Eroare internă: motor lipsă.';return;}
+  try { window.__runGame(); }
+  catch(e){ document.getElementById('intro-title').textContent='Eroare joc: '+e.message; }
 })();
 <\/script>
-<script type="text/plain" id="run">
-var MASTER=window.MASTER;`
-    : `<script>
-var TPL    = ${tplJson};
-var MASTER = ${masterExpr};`;
+</body>
+</html>`
+    : `<\/script>
+</body>
+</html>`;
 
   return `<!doctype html>
 <html lang="ro">
@@ -3108,9 +3127,7 @@ buildDots();
   startTimer(); /* resume → reia ceasul de la deadline-ul absolut salvat */
   startMusic(); /* resume → reia muzica (T10) */
 })();
-<\/script>
-</body>
-</html>`;
+${_scriptClose}`;
 }
 
 function gameCampaign(cfg) {
