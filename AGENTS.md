@@ -47,6 +47,10 @@ npx playwright test tests/smoke.mjs --grep @share      # Iterația 3: 6
 - **Demo-urile sunt generate.** `exemplu-*.html` = jocuri exportate din builder, unul per stil.
   **NU le edita manual** — după modificări la motoare, regenerează prin export. `index.html` = doar
   landing care leagă builder-ul + demo-urile.
+- **`play.html` este generat.** Player universal (toate 5 motoare inline, boot din hash). Generat cu
+  `playerHTML()` din builder și commitat în repo pentru GitHub Pages. **Regenerează după orice
+  modificare la motoare:** `node --input-type=module < /tmp/gen-player.mjs` (sau echivalent Playwright)
+  → `git add play.html && git commit && git push github main`.
 - **Stare.** Obiectul `state` (titlu, poveste, culoare, `style`, `puzzles`) se persistă în
   `localStorage` sub cheia `escape-builder-v1`; export/import ca JSON. Editorul scrie via `data-g` →
   `onChange()` → persist + `refreshPreview()` (debounce 400ms) care setează `iframe.srcdoc`.

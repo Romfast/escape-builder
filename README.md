@@ -19,6 +19,13 @@ URL-ul pointeaza spre player-ul universal hostat pe GitHub Pages:
 Jocul calatoreste comprimat in URL (deflate-raw + base64url); playerul il decodeaza local,
 fara server, fara baza de date. 12+ puzzle-uri incap in ~636 bytes.
 
+> **`play.html` este un fișier generat** — conține toate 5 motoare de joc inline.
+> Dupa modificari la motoare, regenereaza si recommita:
+> ```bash
+> node --input-type=module < /tmp/gen-player.mjs   # sau din builder: playerHTML()
+> git add play.html && git commit -m "regen play.html" && git push github main
+> ```
+
 ## Folosire
 
 Deschide `escape-builder.html` in browser (dublu-click, merge si de pe `file://`).
