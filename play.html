@@ -363,28 +363,14 @@ var TPL    = {"classic":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003che
   }
   var runEl=document.getElementById('run');
   if(!runEl){document.getElementById('intro-title').textContent='Eroare internă: motor lipsă.';return;}
-  var runCode=runEl.textContent;
-  var injected=false;
-  /* Blob URL: compatibil Brave/Firefox strict fără CSP unsafe-inline */
-  try {
-    var blob=new Blob([runCode],{type:'text/javascript'});
-    var burl=URL.createObjectURL(blob);
-    var s=document.createElement('script');
-    s.src=burl;
-    await new Promise(function(res,rej){s.onload=res;s.onerror=rej;document.body.appendChild(s);});
-    URL.revokeObjectURL(burl);
-    injected=true;
-  } catch(e1) {
-    /* fallback: injectare directă (Chrome/Edge clasic) */
-    try {
-      var s2=document.createElement('script');
-      s2.textContent=runCode;
-      document.body.appendChild(s2);
-      injected=true;
-    } catch(e2) {
-      document.getElementById('intro-title').textContent='Eroare browser: '+e2.message;
-    }
-  }
+  /* ASCII-ify: Brave respinge non-ASCII in comentarii JS (encoding mismatch) */
+  var runCode=runEl.textContent.replace(/[^\x00-\x7F]/g,function(c){
+    return '\\u'+('000'+c.charCodeAt(0).toString(16)).slice(-4);
+  });
+  var s=document.createElement('script');
+  s.textContent=runCode;
+  try { document.body.appendChild(s); }
+  catch(e){ document.getElementById('intro-title').textContent='Eroare browser: '+e.message; }
 })();
 </script>
 <script type="text/plain" id="run">
