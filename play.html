@@ -355,8 +355,18 @@ var TPL    = {"classic":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003che
 (async function(){
   var h=location.hash.slice(1);
   if(!h){document.getElementById('intro-title').textContent='Niciun joc în acest link.';return;}
-  window.MASTER=JSON.parse(await inflateFromBase64url(h));
-  var s=document.createElement('script');s.textContent=document.getElementById('run').textContent;document.body.appendChild(s);
+  try {
+    window.MASTER=JSON.parse(await inflateFromBase64url(h));
+  } catch(e) {
+    document.getElementById('intro-title').textContent='Link invalid sau corupt. Regenerează QR-ul din builder.';
+    return;
+  }
+  var runEl=document.getElementById('run');
+  if(!runEl){document.getElementById('intro-title').textContent='Eroare internă: motor lipsă.';return;}
+  var s=document.createElement('script');
+  s.textContent=runEl.textContent;
+  try { document.body.appendChild(s); }
+  catch(e) { document.getElementById('intro-title').textContent='Eroare browser: '+e.message; }
 })();
 </script>
 <script type="text/plain" id="run">
