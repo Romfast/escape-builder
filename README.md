@@ -1,6 +1,23 @@
 # Escape Room Builder
 
-Generator de jocuri escape room intr-un singur fisier HTML, fara backend, fara build. Acelasi set de puzzle-uri poate fi exportat in 5 stiluri de joc diferite.
+**[▶ Demo live](https://romfast.github.io/escape-builder/escape-builder.html)** · **[Player universal](https://romfast.github.io/escape-builder/play.html)**
+
+Generator de jocuri escape room intr-un singur fisier HTML, fara backend, fara build. Acelasi set de puzzle-uri poate fi exportat in 5 stiluri de joc diferite sau ca **campanie** multi-camera cu harta.
+
+## Distribuie prin link + QR
+
+Builder-ul poate comprima jocul intr-un URL scurt si genera un cod QR printabil:
+
+1. Adauga puzzle-uri in editor
+2. Apasa **„Generează QR / link"** — apare QR-ul + URL-ul complet
+3. Trimite URL-ul sau printeaza cardul QR (buton „Printează cardul QR")
+4. Jucatorul deschide link-ul pe telefon — campania porneste instant
+
+URL-ul pointeaza spre player-ul universal hostat pe GitHub Pages:
+`https://romfast.github.io/escape-builder/play.html#<joc-comprimat>`
+
+Jocul calatoreste comprimat in URL (deflate-raw + base64url); playerul il decodeaza local,
+fara server, fara baza de date. 12+ puzzle-uri incap in ~636 bytes.
 
 ## Folosire
 
@@ -13,12 +30,11 @@ cd /workspace/escape-builder
 python3 -m http.server 8000
 ```
 
-Apoi navigheaza la `http://<IP-server>:8000/escape-builder.html` (in containerul curent: `http://10.0.20.171:8000/escape-builder.html`).
-
 - **Stanga**: editor — titlu, poveste, culoare, **stil joc**, puzzle-uri (raspuns liber / adevarat-fals / variante), indiciu si litera per puzzle.
 - **Dreapta**: preview live — jocul exact cum va arata, jucabil direct in pagina.
 - **Exporta jocul HTML**: descarca un joc standalone pe care il trimiti pe telefon/email; merge offline.
 - **Salveaza / Incarca JSON**: pastreaza proiectul ca fisier ca sa-l reiei mai tarziu.
+- **Generează QR / link**: comprima jocul intr-un URL + afiseaza cod QR printabil.
 
 Proiectul curent se salveaza automat in `localStorage` la fiecare modificare.
 
@@ -41,12 +57,13 @@ Proiectul curent se salveaza automat in `localStorage` la fiecare modificare.
 
 ## Testare
 
-Suita de teste Playwright (smoke + campanie), fara server, direct pe `file://`:
+Suita de teste Playwright (smoke + campanie + share), fara server, direct pe `file://`:
 
 ```bash
-npx playwright test tests/smoke.mjs              # toata suita (26/26)
+npx playwright test tests/smoke.mjs              # toata suita (41/41)
 npx playwright test tests/smoke.mjs --grep @regresie
 npx playwright test tests/smoke.mjs --grep @campanie
+npx playwright test tests/smoke.mjs --grep @share
 ```
 
 Detalii harness in `tests/AGENTS.md`.
