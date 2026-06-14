@@ -1,0 +1,1054 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Escape Room Player</title>
+<style>
+/*
+ * ASCII DIAGRAM — contractul parent.*:
+ * ┌──────────── orchestrator (window) ─────────────────────────┐
+ * │  nextRoom({idx,stars,letter})   ← camera.parent.nextRoom   │
+ * │  roomReady(idx)                 ← camera.parent.roomReady  │
+ * │  roomError(idx,msg)             ← camera.parent.roomError  │
+ * │  beep(ok)                       ← camera.parent.beep       │
+ * └────────────────────────────────────────────────────────────┘
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--c-bg, #0d0620); color: var(--c-ink, #fff);
+  display: flex; flex-direction: column;
+  --c-bg: #0d0620; --c-surface: #221440; --c-line: rgba(255,255,255,.18);
+  --c-ink: #fff; --c-gold: #fbbf24;
+}
+#chrome {
+  height: 48px; min-height: 48px; flex-shrink: 0;
+  background: #1a0e3a; border-bottom: 1px solid rgba(255,255,255,.15);
+  display: flex; align-items: center; padding: 0 16px; gap: 12px;
+}
+#chrome-title { font-size: 15px; font-weight: 700; }
+#chrome .sp { flex: 1; }
+/* Timer Calm (§Design pct.10) — neutru; auriu sub 1 min; înghețat la expirare (fără roșu pulsant) */
+#chrome-timer {
+  font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px;
+  color: var(--c-ink); letter-spacing: .02em; min-width: 3.1em; text-align: right;
+}
+#chrome-timer[hidden] { display: none; }
+#chrome-timer.low { color: var(--c-gold); }
+#chrome-timer.expired { color: var(--c-gold); opacity: .55; }
+#btn-voice, #btn-music {
+  width: 34px; height: 34px; min-width: 34px; padding: 0; border: 0; cursor: pointer;
+  border-radius: 8px; background: rgba(255,255,255,.12); color: #fff;
+  font-size: 17px; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+}
+#btn-voice[hidden], #btn-music[hidden] { display: none; } /* id batea specificitatea UA [hidden] */
+#btn-voice:hover, #btn-music:hover { background: rgba(255,255,255,.22); }
+#btn-voice[aria-pressed="false"], #btn-music[aria-pressed="false"] { opacity: .5; }
+#btn-voice:focus-visible, #btn-music:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+#dots { display: flex; gap: 8px; }
+#dots span {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: rgba(255,255,255,.2); transition: background .3s; display: inline-block;
+}
+#dots span.active { background: #a78bfa; }
+#dots span.done   { background: var(--c-gold); }
+#room-wrap { flex: 1; position: relative; min-height: 0; }
+#room-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+/* Overlay-uri */
+.overlay {
+  display: none; position: absolute; inset: 0;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 18px; padding: 24px; text-align: center; overflow-y: auto;
+}
+.overlay.show { display: flex; }
+/* Intro */
+#intro { background: var(--c-bg); }
+#intro h1 { margin: 0; font-size: clamp(22px,5vw,36px); font-weight: 900; }
+#intro .story-text { color: rgba(255,255,255,.8); max-width: 56ch; line-height: 1.6; }
+#intro .promise { color: rgba(255,255,255,.5); font-size: 14px; }
+/* ===== Overworld (hartă top-down — înlocuiește coridorul) ===== */
+#overworld.overlay { padding: 0; gap: 0; background: var(--c-bg); }
+#ow-wrap { position: relative; flex: 1; width: 100%; overflow: hidden; }
+#ow-world { position: absolute; left: 0; top: 0; transition: transform .12s linear; }
+.ow-tile { position: absolute; width: 40px; height: 40px; }
+.ow-floor { background: #2a1d4d; }
+.ow-floor.alt { background: #2f2156; }
+.ow-wall { background: #14092e; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
+.ow-door { position: absolute; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; color: #fff; border-radius: 7px; background: #e11d48; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+.ow-door.solved { background: var(--c-gold); color: #3a2606; }
+.ow-door.target { box-shadow: 0 0 0 3px #a78bfa, 0 2px 10px rgba(167,139,250,.6); }
+.ow-door.locked { background: #374151; filter: grayscale(1) brightness(.65); opacity: .7; cursor: not-allowed; }
+.ow-exit { position: absolute; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 20px; border-radius: 7px; background: #3b2a63; filter: grayscale(1) brightness(.7); }
+.ow-exit.open { background: #166534; filter: none; box-shadow: 0 0 14px #22c55e; }
+.ow-player { position: absolute; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 24px; transition: left .1s linear, top .1s linear; z-index: 3; }
+#ow-hint { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font-size: 13px; color: rgba(255,255,255,.72); z-index: 4; pointer-events: none; padding: 0 8px; }
+#ow-toast { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(0,0,0,.72); padding: 6px 14px; border-radius: 20px; font-size: 14px; font-weight: 700; color: var(--c-gold); z-index: 4; opacity: 0; transition: opacity .3s; pointer-events: none; }
+#ow-toast.show { opacity: 1; }
+#ow-dpad { position: absolute; right: 10px; bottom: 10px; display: grid; grid-template-columns: repeat(3, 44px); grid-template-rows: repeat(3, 44px); gap: 4px; z-index: 5; }
+#ow-dpad button { border: 1px solid #4a3590; background: rgba(34,22,67,.85); color: #cdc3f0; border-radius: 9px; font-size: 16px; cursor: pointer; }
+#ow-dpad button:active { background: var(--accent); }
+#ow-dpad .sp { visibility: hidden; }
+/* Skip */
+#skip-banner { background: var(--c-bg); }
+/* ===== UȘILE — 5 stiluri × 3 stări ===== */
+:root { --c-gold: #fbbf24; }
+/* Common */
+.door-lock {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,.65); border-radius: 6px; padding: 2px 7px;
+  font-size: 13px; line-height: 1.4; z-index: 2; pointer-events: none;
+}
+@keyframes door-open {
+  0%   { transform: scale(1) rotateY(0deg);    opacity: 1; }
+  50%  { transform: scale(1.06) rotateY(-30deg); opacity: .8; }
+  100% { transform: scale(.85) rotateY(-90deg);  opacity: 0; }
+}
+.opening { animation: door-open .25s cubic-bezier(.4,0,1,1) forwards; transform-origin: left center; perspective: 600px; }
+@media (prefers-reduced-motion: reduce) {
+  .opening { animation: none; opacity: 0; }
+  #fin-word span { animation: none !important; }
+  .door-terminal .dt-cur { animation: none !important; }
+  .confetti { display: none !important; }
+}
+/* Classic */
+.door-classic {
+  width: 88px; height: 124px; position: relative;
+  background: #fff; border-radius: 10px; border: 1.5px solid rgba(0,0,0,.06);
+  box-shadow: 0 8px 32px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.9);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-classic .dq { font-size: 50px; font-weight: 900; line-height: 1; color: var(--c-gold); text-shadow: 0 2px 14px rgba(251,191,36,.6); user-select: none; }
+.door-classic::after { content: ''; position: absolute; right: 12px; top: 50%; width: 8px; height: 8px; border-radius: 50%; background: rgba(0,0,0,.22); margin-top: -4px; }
+.door-classic.stuck { filter: grayscale(1) brightness(.6); }
+.door-classic.crescendo { transform: scale(1.35); box-shadow: 0 0 0 3px var(--c-gold), 0 14px 48px rgba(251,191,36,.35), 0 8px 32px rgba(0,0,0,.55); }
+/* Terminal */
+.door-terminal {
+  width: 88px; height: 124px; position: relative;
+  background: #000; border: 2px solid #39ff6e; overflow: hidden;
+  box-shadow: 0 0 16px rgba(57,255,110,.4), inset 0 0 12px rgba(57,255,110,.07);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-terminal::before { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, rgba(0,0,0,.32) 0 1px, transparent 1px 3px); }
+.door-terminal .dt-txt { font: 700 10px/1.2 "Courier New", monospace; letter-spacing: .12em; color: #39ff6e; text-shadow: 0 0 8px rgba(57,255,110,.75); z-index: 1; }
+.door-terminal .dt-cur { font: 16px/1 "Courier New", monospace; color: #39ff6e; text-shadow: 0 0 8px rgba(57,255,110,.75); animation: dt-blink 1s step-end infinite; z-index: 1; }
+@keyframes dt-blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+.door-terminal.stuck { filter: grayscale(1) brightness(.55); border-color: #444; box-shadow: none; }
+.door-terminal.stuck .dt-cur { animation: none; opacity: 0; }
+.door-terminal.crescendo { transform: scale(1.35); box-shadow: 0 0 0 2px #39ff6e, 0 0 32px rgba(57,255,110,.7), inset 0 0 18px rgba(57,255,110,.14); }
+/* Arcade */
+.door-arcade {
+  width: 88px; height: 124px; position: relative;
+  background: #18102e; border: 4px solid #4ade80;
+  box-shadow: inset 0 0 0 4px #166534, 0 0 0 4px #0a1606, 0 8px 24px rgba(0,0,0,.7);
+  display: flex; align-items: center; justify-content: center; image-rendering: pixelated;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-arcade::after { content: ''; position: absolute; right: 12px; top: 50%; margin-top: -5px; width: 10px; height: 10px; background: var(--c-gold); box-shadow: inset -2px -2px 0 #b45309, inset 1px 1px 0 #fde68a; }
+.door-arcade .da-sprite { font: 900 24px/1 ui-monospace, monospace; color: #4ade80; text-shadow: 0 0 10px rgba(74,222,128,.55); user-select: none; }
+.door-arcade.stuck { filter: grayscale(1) brightness(.55); box-shadow: none; }
+.door-arcade.crescendo { transform: scale(1.35); box-shadow: inset 0 0 0 4px #166534, 0 0 0 4px #0a1606, 0 0 0 8px #4ade80, 0 0 28px rgba(74,222,128,.5), 0 8px 24px rgba(0,0,0,.7); }
+/* Chat */
+.door-chat {
+  width: 72px; height: 124px; position: relative;
+  background: linear-gradient(165deg, #1d4ed8 0%, #1e3a8a 100%);
+  border-radius: 12px; border: 1.5px solid rgba(255,255,255,.14);
+  box-shadow: 0 8px 28px rgba(29,78,216,.5), inset 0 1px 0 rgba(255,255,255,.2);
+  display: flex; flex-direction: column; align-items: center; padding: 8px 6px 10px; gap: 5px;
+  transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s, filter .25s;
+}
+.door-chat .dc-notch { width: 18px; height: 4px; background: rgba(0,0,0,.4); border-radius: 2px; flex-shrink: 0; }
+.door-chat .dc-screen { flex: 1; width: 100%; background: #0f172a; border-radius: 7px; padding: 7px 5px; display: flex; flex-direction: column; gap: 5px; overflow: hidden; }
+.door-chat .dc-bub { border-radius: 8px; padding: 4px 7px; font-size: 9px; color: rgba(255,255,255,.85); line-height: 1.2; max-width: 80%; }
+.door-chat .dc-npc { background: #1e40af; align-self: flex-start; }
+.door-chat .dc-me  { background: #3b82f6; align-self: flex-end; }
+.door-chat .dc-home { width: 22px; height: 3px; background: rgba(255,255,255,.3); border-radius: 2px; flex-shrink: 0; }
+.door-chat.stuck { filter: grayscale(1) brightness(.55); }
+.door-chat.crescendo { transform: scale(1.35); box-shadow: 0 0 0 2px #3b82f6, 0 12px 48px rgba(29,78,216,.7), inset 0 1px 0 rgba(255,255,255,.25); }
+/* Point */
+.door-point { width: 88px; height: 124px; position: relative; display: flex; align-items: center; justify-content: center; transition: transform .25s cubic-bezier(.22,1,.36,1), filter .25s; }
+.door-point svg { width: 88px; height: 124px; display: block; }
+.door-point.stuck { filter: grayscale(1) brightness(.6); }
+.door-point.crescendo { transform: scale(1.35); filter: drop-shadow(0 0 12px rgba(243,207,109,.6)) drop-shadow(0 0 32px rgba(138,90,43,.35)); }
+#skip-banner h2 { margin: 0; font-size: 22px; }
+#skip-code { font-family: ui-monospace, monospace; font-size: 12px; color: rgba(255,255,255,.35); margin-top: 4px; }
+/* Final */
+#finale { background: var(--c-bg); }
+#finale h1 { margin: 0; font-size: 28px; }
+#fin-stars { font-size: 26px; color: var(--c-gold); letter-spacing: 4px; }
+#fin-word { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+#fin-word span {
+  width: 44px; height: 52px; background: var(--accent); border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards;
+}
+@keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }
+#fin-msg { color: rgba(255,255,255,.8); max-width: 56ch; }
+/* Butoane */
+.btn-main {
+  font: inherit; font-size: 16px; font-weight: 700;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 12px; padding: 14px 28px; cursor: pointer;
+  min-height: 44px; width: 100%; max-width: 320px;
+}
+.btn-main:hover { filter: brightness(1.1); }
+.btn-main:disabled { opacity: .5; cursor: not-allowed; }
+.btn-sec {
+  font: inherit; font-size: 15px; font-weight: 700;
+  background: rgba(255,255,255,.12); color: #fff; border: 1px solid rgba(255,255,255,.22);
+  border-radius: 12px; padding: 12px 24px; cursor: pointer; min-height: 44px;
+  width: 100%; max-width: 320px;
+}
+.btn-sec:hover { background: rgba(255,255,255,.2); }
+.btn-main:focus-visible, .btn-sec:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
+.fin-actions, .dipl-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; }
+/* ----- Diplomă A4 print-first (§Design pct.9) ----- */
+#diploma { background: #0d0620; gap: 16px; }
+.dipl-sheet {
+  width: 100%; max-width: 520px; aspect-ratio: 210 / 297; background: #fff; color: #1a1333;
+  border-radius: 6px; box-shadow: 0 18px 50px rgba(0,0,0,.5);
+  display: flex; padding: 10px; overflow: hidden;
+}
+.dipl-frame {
+  flex: 1; border: 3px double var(--accent); border-radius: 4px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  gap: 2.2%; padding: 6% 7%; text-align: center;
+}
+.dipl-title { font-family: Georgia, "Times New Roman", serif; font-weight: 700; letter-spacing: .04em;
+  font-size: clamp(20px, 5.2vw, 30px); color: var(--accent); }
+.dipl-sub { font-size: clamp(11px, 2.4vw, 13px); color: #6b6480; text-transform: uppercase; letter-spacing: .12em; }
+.dipl-name { font-size: clamp(26px, 7vw, 42px); font-weight: 800; line-height: 1.05; color: #1a1333; word-break: break-word; }
+.dipl-game { font-size: clamp(12px, 2.8vw, 15px); color: #4a4360; font-style: italic; }
+.dipl-rooms { display: flex; flex-direction: column; gap: 3px; width: 100%; max-width: 320px; margin-top: 2%; }
+.dipl-rooms .dipl-room { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: clamp(11px, 2.4vw, 13px); color: #4a4360; border-bottom: 1px dotted rgba(0,0,0,.12); padding: 2px 0; }
+.dipl-rooms .dipl-room .rstars { color: #c8952a; letter-spacing: 1px; white-space: nowrap; }
+.dipl-rooms .dipl-room .rskip { color: #9a93ad; }
+.dipl-wordlbl { font-size: clamp(10px, 2.2vw, 12px); text-transform: uppercase; letter-spacing: .12em; color: #6b6480; margin-top: 2%; }
+.dipl-word { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.dipl-word span { width: clamp(24px, 7vw, 38px); aspect-ratio: 5 / 6; background: var(--accent); color: #fff;
+  border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: clamp(15px, 4vw, 22px); font-weight: 800; }
+.dipl-word span.lock { background: #d8d3e4; color: #6b6480; }
+.dipl-footer { margin-top: auto; font-size: clamp(10px, 2.2vw, 12px); color: #6b6480; line-height: 1.5; }
+.dipl-footer .dipl-expired { color: #c8952a; }
+@media print {
+  body * { visibility: hidden !important; }
+  #diploma, #diploma * { visibility: visible !important; }
+  #diploma { position: fixed; inset: 0; display: flex !important; background: #fff !important; padding: 0; }
+  .dipl-actions { display: none !important; }
+  .dipl-sheet { box-shadow: none; max-width: none; width: auto; height: auto; margin: 20mm; aspect-ratio: 210 / 297; }
+  .dipl-title, .dipl-word span, .dipl-frame { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+.btn-skip {
+  font: inherit; font-size: 15px; font-weight: 700;
+  background: #4b5563; color: #fff; border: none;
+  border-radius: 12px; padding: 12px 24px; cursor: pointer; min-height: 44px;
+}
+.confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }
+@keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }
+@media (max-width: 599px) {
+  #chrome { height: 40px; min-height: 40px; }
+  #chrome-title { font-size: 13px; }
+  #chrome-timer { font-size: 13px; }
+  #dots span { width: 8px; height: 8px; }
+}
+</style>
+</head>
+<body>
+
+<div id="chrome">
+  <span id="chrome-title">Escape Room Player</span>
+  <div class="sp"></div>
+  <span id="chrome-timer" role="timer" aria-label="Timp ramas" hidden>0:00</span>
+  <button id="btn-music" type="button" aria-label="Muzica de fundal" hidden>&#127925;</button>
+  <button id="btn-voice" type="button" aria-label="Naratiune vocala" hidden>&#128266;</button>
+  <div id="dots" role="group" aria-label="Progres camere"></div>
+</div>
+
+<div id="room-wrap">
+  <iframe id="room-frame" data-room title="Camera curentă"></iframe>
+
+  <div id="intro" class="overlay show">
+    <h1 id="intro-title"></h1>
+    <p class="story-text" id="intro-story"></p>
+    <p class="promise" id="intro-promise"></p>
+    <button class="btn-main" id="btn-start">Începe aventura</button>
+  </div>
+
+  <div id="overworld" class="overlay">
+    <div id="ow-wrap">
+      <div id="ow-world"></div>
+      <div id="ow-toast"></div>
+      <div id="ow-hint"></div>
+      <div id="ow-dpad" role="group" aria-label="Deplasare pe harta">
+        <button class="sp" aria-hidden="true" tabindex="-1"></button><button data-d="U" aria-label="Sus">&#9650;</button><button class="sp" aria-hidden="true" tabindex="-1"></button>
+        <button data-d="L" aria-label="Stanga">&#9664;</button><button class="sp" aria-hidden="true" tabindex="-1"></button><button data-d="R" aria-label="Dreapta">&#9654;</button>
+        <button class="sp" aria-hidden="true" tabindex="-1"></button><button data-d="D" aria-label="Jos">&#9660;</button><button class="sp" aria-hidden="true" tabindex="-1"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="skip-banner" class="overlay">
+    <h2>⚠️ Ușa asta e înțepenită!</h2>
+    <div id="skip-door"></div>
+    <p>Camera nu a răspuns. Poți sări la cea următoare.</p>
+    <div class="skip-code" id="skip-code"></div>
+    <button class="btn-skip" id="btn-skip">Sari la camera următoare</button>
+  </div>
+
+  <div id="finale" class="overlay" data-final>
+    <h1>🏆 Evadare reușită!</h1>
+    <div class="fstars" id="fin-stars"></div>
+    <p>Cuvântul magic:</p>
+    <div id="fin-word"></div>
+    <p id="fin-msg"></p>
+    <div class="fin-actions">
+      <button class="btn-main" id="btn-diploma">Vezi diploma &rarr;</button>
+      <button class="btn-sec" id="btn-replay">Joacă din nou</button>
+    </div>
+  </div>
+
+  <!-- Diplomă A4 print-first (§Design pct.9) — populată la „Vezi diploma" -->
+  <div id="diploma" class="overlay" aria-hidden="true">
+    <div class="dipl-sheet" role="document" aria-label="Diplomă de evadare">
+      <div class="dipl-frame">
+        <div class="dipl-title">DIPLOMĂ DE EVADARE</div>
+        <div class="dipl-sub">se acordă lui</div>
+        <div class="dipl-name" id="dipl-name"></div>
+        <div class="dipl-game" id="dipl-game"></div>
+        <div class="dipl-rooms" id="dipl-rooms"></div>
+        <div class="dipl-wordlbl">Cuvântul magic</div>
+        <div class="dipl-word" id="dipl-word"></div>
+        <div class="dipl-footer" id="dipl-footer"></div>
+      </div>
+    </div>
+    <div class="dipl-actions">
+      <button class="btn-main" id="dipl-print">Printează diploma</button>
+      <button class="btn-sec" id="dipl-back">&larr; Înapoi</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function bytesToB64url(bytes){
+  var chunks=[];
+  for(var i=0;i<bytes.length;i+=8192)chunks.push(String.fromCharCode.apply(null,bytes.subarray(i,i+8192)));
+  return btoa(chunks.join('')).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+}
+function b64urlToBytes(str){
+  var b64=str.replace(/-/g,'+').replace(/_/g,'/');
+  var bin=atob(b64);var bytes=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+  return bytes;
+}
+async function inflateFromBase64url(str){
+  var bytes=b64urlToBytes(str);
+  var ds=new DecompressionStream('deflate-raw');
+  var writer=ds.writable.getWriter();writer.write(bytes);writer.close();
+  var buf=await new Response(ds.readable).arrayBuffer();
+  return new TextDecoder().decode(buf);
+}
+var TPL    = {"classic":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003chead>\n\u003cmeta charset=\"utf-8\">\n\u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\u003ctitle>\u003c/title>\n\u003cstyle>\n  * { box-sizing: border-box; }\n  body {\n    margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, \"Segoe UI\", sans-serif;\n    color: #f1f0ff; display: flex; align-items: center; justify-content: center; padding: 16px;\n    background: radial-gradient(ellipse at 50% 30%, #2a0e5e 0%, #0e0622 70%);\n  }\n  .card {\n    width: 100%; max-width: 560px; background: #1a0e3d;\n    border: 1px solid rgba(255,255,255,.18); border-radius: 20px; padding: 26px;\n    backdrop-filter: blur(6px);\n    box-shadow: 0 0 0 1px rgba(255,255,255,.06), 0 24px 60px rgba(0,0,0,.55), 0 0 40px rgba(109,40,217,.35);\n  }\n  h1 { margin: 0 0 6px; font-size: 26px; text-align: center; }\n  .story { color: rgba(255,255,255,.8); text-align: center; line-height: 1.5; }\n  .screen { display: none; }\n  .screen.on { display: block; animation: pop .35s cubic-bezier(.22,1,.36,1); }\n  @keyframes pop { from { transform: scale(.94) translateY(6px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }\n  .progress { height: 10px; background: rgba(255,255,255,.12); border-radius: 99px; overflow: hidden; margin: 14px 0 4px; }\n  .progress i { display: block; height: 100%; background: var(--accent); width: 0; box-shadow: 0 0 8px var(--accent); transition: width .5s cubic-bezier(.22,1,.36,1); }\n  .meta { display: flex; justify-content: space-between; font-size: 12px; color: rgba(255,255,255,.6); margin-bottom: 14px; }\n  .letters { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin: 14px 0; }\n  .tile {\n    width: 44px; height: 48px; border-radius: 10px; display: flex; align-items: center; justify-content: center;\n    font-weight: 800; font-size: 20px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18);\n    color: rgba(255,255,255,.35);\n  }\n  .tile.won { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 0 12px var(--accent); animation: flip .5s cubic-bezier(.34,1.56,.64,1); }\n  @keyframes flip { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }\n  .qtitle { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-light); font-weight: 700; }\n  .question { font-size: 21px; line-height: 1.5; margin: 8px 0 18px; color: #f1f0ff; }\n  input[type=text] {\n    width: 100%; font: inherit; font-size: 18px; padding: 11px 13px; border-radius: 10px;\n    border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.25); color: #fff; text-align: center;\n  }\n  input:focus { outline: 2px solid var(--accent); outline-offset: 2px; border-color: transparent; }\n  button {\n    font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px;\n    font-weight: 700; background: var(--accent); color: #fff; width: 100%; margin-top: 10px; min-height: 44px;\n  }\n  button:hover { filter: brightness(1.12); }\n  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }\n  button.opt { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); font-weight: 600; text-align: left; min-height: 48px; transition: background .15s, border-color .15s; }\n  button.opt:hover { background: rgba(255,255,255,.16); border-color: var(--accent); }\n  button.hint { background: none; border: none; color: rgba(255,255,255,.55); font-weight: 600; font-size: 13px; width: auto; display: block; margin: 12px auto 0; }\n  button.hint:hover { color: #fff; }\n  .hinttext { background: rgba(255,255,255,.1); border-radius: 9px; padding: 10px 12px; font-size: 14px; margin-top: 10px; white-space: pre-line; display: none; }\n  .feedback { min-height: 22px; text-align: center; font-weight: 700; margin-top: 10px; }\n  .feedback.bad { color: #fda4af; }\n  .feedback.good { color: #86efac; }\n  .shake { animation: shake .4s ease; }\n  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }\n  .stars { text-align: center; font-size: 26px; letter-spacing: 4px; color: #fbbf24; margin: 6px 0; }\n  .bigword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 18px 0; }\n  .bigword span {\n    width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex;\n    align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flip .6s ease backwards;\n  }\n  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 5; animation: fall linear forwards; }\n  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }\n  @media (prefers-reduced-motion: reduce) {\n    .screen.on, .tile.won, .bigword span, .shake { animation: none; }\n    .confetti { display: none !important; }\n    .progress i { transition: none; }\n  }\n\u003c/style>\n\u003c/head>\n\u003cbody>\n\u003cdiv class=\"card\">\n  \u003cdiv id=\"sStart\" class=\"screen on\">\n    \u003ch1 id=\"gtitle\">\u003c/h1>\n    \u003cp class=\"story\" id=\"gstory\">\u003c/p>\n    \u003cbutton id=\"btnStart\">Incepe aventura\u003c/button>\n  \u003c/div>\n\n  \u003cdiv id=\"sGame\" class=\"screen\">\n    \u003cdiv class=\"progress\">\u003ci id=\"bar\">\u003c/i>\u003c/div>\n    \u003cdiv class=\"meta\">\u003cspan id=\"step\">\u003c/span>\u003cspan id=\"score\">\u003c/span>\u003c/div>\n    \u003cdiv class=\"letters\" id=\"lettersBar\">\u003c/div>\n    \u003cdiv id=\"qbox\">\n      \u003cdiv class=\"qtitle\" id=\"qtitle\">\u003c/div>\n      \u003cdiv class=\"question\" id=\"qtext\">\u003c/div>\n      \u003cdiv id=\"answers\">\u003c/div>\n      \u003cdiv class=\"feedback\" id=\"feedback\">\u003c/div>\n      \u003cbutton class=\"hint\" id=\"btnHint\">Vreau un indiciu\u003c/button>\n      \u003cdiv class=\"hinttext\" id=\"hinttext\">\u003c/div>\n    \u003c/div>\n  \u003c/div>\n\n  \u003cdiv id=\"sFinal\" class=\"screen\">\n    \u003ch1>Evadare reusita!\u003c/h1>\n    \u003cdiv class=\"stars\" id=\"finalStars\">\u003c/div>\n    \u003cdiv class=\"bigword\" id=\"bigword\">\u003c/div>\n    \u003cp class=\"story\" id=\"finalMsg\">\u003c/p>\n    \u003cbutton id=\"btnAgain\">Joaca din nou\u003c/button>\n  \u003c/div>\n\u003c/div>\n\n\u003cscript>\nvar CFG = __CFG__;\ndocument.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');\nvar totalStars = 0;\nfunction el(id){ return document.getElementById(id); }\nfunction norm(s){ return String(s).trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.'); }\nfunction starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3); }\nfunction finalWord(){ var w = ''; for (var i = 0; i \u003c CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }\nfunction choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }\nfunction choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i \u003c ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }\nvar _lastGiven = '';\nfunction checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); var ok = norm(given) !== '' && norm(given) === norm(exp); if(ok){ _lastGiven = given; } return ok; }\nfunction beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }\nfunction confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i \u003c 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }\nfunction roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }\n/* Contract de finalizare a camerei — un singur loc pentru payload-ul parent.nextRoom\n   (înlocuiește duplicatele din showFinal/finale; D7). Citește totalStars + finalWord() la apel. */\nfunction campaignDone(){ if(CFG._campaign){ try{ var p = CFG.puzzles[0]; var bkey = '*'; if(p.type === 'tf'){ bkey = _lastGiven || 'Adevarat'; } else if(p.type === 'choice'){ var opts = choiceOpts(p); var bi = opts.findIndex(function(o){ return norm(o) === norm(_lastGiven); }); bkey = String(bi >= 0 ? bi : 0); } parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:finalWord().charAt(0), branch:bkey}); }catch(e){} } }\nwindow.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };\nif(CFG._campaign){\n  /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */\n  var _cs = document.createElement('style');\n  _cs.textContent = 'h1{display:none!important}.progress{display:none!important}.meta{display:none!important}';\n  (document.head || document.documentElement).appendChild(_cs);\n}\ndocument.documentElement.style.setProperty('--accent-light', 'color-mix(in srgb, ' + (CFG.color || '#6d28d9') + ' 40%, white)');\n\nvar idx = 0, attempts = 0, hintUsed = false, won = [];\n/* CFG, totalStars, el, norm, beep, confetti, starsFor, finalWord, checkAnswer,\n   choiceOpts, campaignDone, roomReady, window.onerror — toate din libJS (D7) */\nfunction show(id) {\n  var scr = document.querySelectorAll('.screen');\n  for (var i = 0; i \u003c scr.length; i++) scr[i].classList.remove('on');\n  el(id).classList.add('on');\n}\n\nel('gtitle').textContent = CFG.title;\nvar hello = CFG.player ? 'Salut, ' + CFG.player + '! ' : '';\nel('gstory').textContent = hello + CFG.story;\n\nel('btnStart').onclick = function () { show('sGame'); renderPuzzle(); };\nel('btnAgain').onclick = function () { location.reload(); };\n\nfunction lettersBar() {\n  var bar = el('lettersBar');\n  bar.innerHTML = '';\n  var any = false;\n  for (var i = 0; i \u003c CFG.puzzles.length; i++) {\n    var L = (CFG.puzzles[i].letter || '').trim();\n    if (!L) continue;\n    any = true;\n    var d = document.createElement('div');\n    d.className = 'tile' + (won[i] ? ' won' : '');\n    d.textContent = won[i] ? L.toUpperCase() : '?';\n    bar.appendChild(d);\n  }\n  bar.style.display = any ? '' : 'none';\n}\n\nfunction renderPuzzle() {\n  var p = CFG.puzzles[idx];\n  attempts = 0; hintUsed = false;\n  el('bar').style.width = (idx / CFG.puzzles.length * 100) + '%';\n  el('step').textContent = 'Puzzle ' + (idx + 1) + ' din ' + CFG.puzzles.length;\n  el('score').textContent = totalStars + ' \\u2605';\n  el('qtitle').textContent = p.title || 'Puzzle ' + (idx + 1);\n  el('qtext').textContent = p.question;\n  el('feedback').textContent = ''; el('feedback').className = 'feedback';\n  el('hinttext').style.display = 'none';\n  el('hinttext').textContent = p.hint || '';\n  el('btnHint').style.display = p.hint ? '' : 'none';\n  lettersBar();\n\n  var box = el('answers');\n  box.innerHTML = '';\n  if (p.type === 'free') {\n    var inp = document.createElement('input');\n    inp.type = 'text'; inp.autocomplete = 'off'; inp.placeholder = 'Scrie raspunsul...';\n    var btn = document.createElement('button');\n    btn.textContent = 'Verifica';\n    btn.onclick = function () { check(p, inp.value); };\n    inp.onkeydown = function (e) { if (e.key === 'Enter') btn.click(); };\n    box.appendChild(inp); box.appendChild(btn);\n    setTimeout(function () { inp.focus(); }, 50);\n  } else if (p.type === 'tf') {\n    ['Adevarat', 'Fals'].forEach(function (v) {\n      var b = document.createElement('button');\n      b.className = 'opt'; b.textContent = v;\n      b.onclick = function () { check(p, v); };\n      box.appendChild(b);\n    });\n  } else {\n    var opts = choiceOpts(p);\n    opts.forEach(function (o) {\n      var b = document.createElement('button');\n      b.className = 'opt'; b.textContent = o;\n      b.onclick = function () { check(p, o); };\n      box.appendChild(b);\n    });\n    if (!opts.length) box.textContent = '(puzzle fara variante - completeaza-le in builder)';\n  }\n}\n\nel('btnHint').onclick = function () {\n  hintUsed = true;\n  el('hinttext').style.display = 'block';\n};\n\nfunction check(p, given) {\n  if (checkAnswer(p, given)) {\n    var stars = starsFor(attempts, hintUsed);\n    totalStars += stars;\n    won[idx] = true;\n    beep(true);\n    var f = el('feedback');\n    f.textContent = 'Corect! +' + stars + ' \\u2605';\n    f.className = 'feedback good';\n    lettersBar();\n    el('bar').style.width = ((idx + 1) / CFG.puzzles.length * 100) + '%';\n    setTimeout(next, 900);\n  } else {\n    attempts++;\n    beep(false);\n    var fb = el('feedback');\n    fb.textContent = 'Nu e bine, mai incearca!';\n    fb.className = 'feedback bad';\n    var card = document.querySelector('.card');\n    card.classList.remove('shake');\n    void card.offsetWidth;\n    card.classList.add('shake');\n  }\n}\n\nfunction next() {\n  idx++;\n  if (idx \u003c CFG.puzzles.length) { renderPuzzle(); return; }\n  if(CFG._campaign){ campaignDone(); return; }\n  show('sFinal');\n  var max = CFG.puzzles.length * 3;\n  el('finalStars').textContent = totalStars + ' / ' + max + ' \\u2605';\n  var word = finalWord();\n  var bw = el('bigword');\n  bw.innerHTML = '';\n  for (var j = 0; j \u003c word.length; j++) {\n    var s = document.createElement('span');\n    s.textContent = word.charAt(j);\n    s.style.animationDelay = (j * 0.18) + 's';\n    bw.appendChild(s);\n  }\n  var name = CFG.player ? CFG.player + ', ' : '';\n  el('finalMsg').textContent = name ? name + (CFG.finalMessage || '').charAt(0).toLowerCase() + (CFG.finalMessage || '').slice(1) : (CFG.finalMessage || '');\n  confetti();\n}\n\nroomReady(); /* beep/confetti/onerror/roomReady din libJS (D7) */\n\u003c/script>\n\u003c/body>\n\u003c/html>","terminal":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003chead>\n\u003cmeta charset=\"utf-8\">\n\u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\u003ctitle>\u003c/title>\n\u003cstyle>\n  * { box-sizing: border-box; }\n  body { margin: 0; min-height: 100vh; background: #040f08; color: #39ff6e; font-family: \"Courier New\", ui-monospace, monospace; animation: crt-flicker 6s infinite; }\n  @keyframes crt-flicker { 0%,96%,100% { opacity: 1; } 97% { opacity: 1; } 98% { opacity: .94; } 99% { opacity: .98; } }\n  #crt { max-width: 680px; margin: 0 auto; padding: 20px 16px 80px; }\n  .line { white-space: pre-wrap; word-break: break-word; line-height: 1.45; font-size: 15px; text-shadow: 0 0 8px rgba(57,255,110,.55); }\n  .line.dim { color: #2ecc71; }\n  .line.warn { color: #ffd24a; text-shadow: 0 0 7px rgba(255,210,74,.45); }\n  .line.bad { color: #ff6b6b; text-shadow: 0 0 7px rgba(255,107,107,.45); }\n  .line.ok { color: #9dffc0; }\n  #inline { display: flex; gap: 8px; align-items: baseline; font-size: 15px; min-height: 44px; text-shadow: 0 0 8px rgba(57,255,110,.55); }\n  #cmd { flex: 1; min-height: 44px; background: none; border: none; outline: none; color: inherit; font: inherit; text-shadow: inherit; caret-color: #39ff6e; }\n  .scan { position: fixed; inset: 0; pointer-events: none; z-index: 2; background: repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px); }\n  .vign { position: fixed; inset: 0; pointer-events: none; z-index: 2; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.6)); }\n  #crt-frame { position: fixed; inset: 0; pointer-events: none; z-index: 3; border: 8px solid #0d1f12; border-radius: 18px; box-shadow: inset 0 0 60px rgba(0,0,0,.6), inset 0 0 0 1px #1a3a24; }\n  @media (prefers-reduced-motion: reduce) { body { animation: none; } }\n\u003c/style>\n\u003c/head>\n\u003cbody>\n\u003cdiv class=\"scan\">\u003c/div>\u003cdiv class=\"vign\">\u003c/div>\u003cdiv id=\"crt-frame\">\u003c/div>\n\u003cdiv id=\"crt\">\u003cdiv id=\"out\">\u003c/div>\n\u003cdiv id=\"inline\">\u003cspan>&gt;\u003c/span>\u003cinput id=\"cmd\" autocomplete=\"off\" autofocus spellcheck=\"false\">\u003c/div>\n\u003c/div>\n\u003cscript>\nvar CFG = __CFG__;\ndocument.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');\nvar totalStars = 0;\nfunction el(id){ return document.getElementById(id); }\nfunction norm(s){ return String(s).trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.'); }\nfunction starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3); }\nfunction finalWord(){ var w = ''; for (var i = 0; i \u003c CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }\nfunction choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }\nfunction choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i \u003c ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }\nvar _lastGiven = '';\nfunction checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); var ok = norm(given) !== '' && norm(given) === norm(exp); if(ok){ _lastGiven = given; } return ok; }\nfunction beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }\nfunction confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i \u003c 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }\nfunction roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }\n/* Contract de finalizare a camerei — un singur loc pentru payload-ul parent.nextRoom\n   (înlocuiește duplicatele din showFinal/finale; D7). Citește totalStars + finalWord() la apel. */\nfunction campaignDone(){ if(CFG._campaign){ try{ var p = CFG.puzzles[0]; var bkey = '*'; if(p.type === 'tf'){ bkey = _lastGiven || 'Adevarat'; } else if(p.type === 'choice'){ var opts = choiceOpts(p); var bi = opts.findIndex(function(o){ return norm(o) === norm(_lastGiven); }); bkey = String(bi >= 0 ? bi : 0); } parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:finalWord().charAt(0), branch:bkey}); }catch(e){} } }\nwindow.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };\nif(CFG._campaign){\n  /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */\n  var _cs = document.createElement('style');\n  _cs.textContent = 'h1{display:none!important}.progress{display:none!important}.meta{display:none!important}';\n  (document.head || document.documentElement).appendChild(_cs);\n}\nvar idx = -1, attempts = 0, hintUsed = false, done = false;\nvar solved = [];\nvar out = el('out'), cmd = el('cmd');\ndocument.body.addEventListener('click', function(){ cmd.focus(); });\n\nvar queue = [], typing = false;\nfunction say(lines, cls, cb){ queue.push({ lines: lines.slice(), cls: cls || '', cb: cb }); pump(); }\nfunction pump(){\n  if (typing) return;\n  var job = queue[0];\n  if (!job) return;\n  if (!job.lines.length) { queue.shift(); if (job.cb) job.cb(); pump(); return; }\n  var text = job.lines.shift();\n  typing = true;\n  var d = document.createElement('div');\n  d.className = 'line ' + job.cls;\n  out.appendChild(d);\n  var i = 0;\n  (function tick(){\n    d.textContent = text.slice(0, i);\n    i += 3;\n    window.scrollTo(0, document.body.scrollHeight);\n    if (i \u003c= text.length + 2) setTimeout(tick, 11);\n    else { d.textContent = text; typing = false; pump(); }\n  })();\n}\nfunction echo(text, cls){ var d = document.createElement('div'); d.className = 'line ' + (cls || ''); d.textContent = text; out.appendChild(d); window.scrollTo(0, document.body.scrollHeight); }\n\nfunction collected(){ var w = ''; for (var i = 0; i \u003c CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += solved[i] ? L.toUpperCase() + ' ' : '_ '; } return w.trim() || '(niciuna)'; }\n\nvar bar = '==============================================';\nvar introLines = CFG._campaign\n  ? [bar, '  ' + CFG.title.toUpperCase(), bar, 'Comenzi: INDICIU, AJUTOR. Scrie raspunsul si apasa Enter.']\n  : [bar, '  ' + CFG.title.toUpperCase(), bar, ' ', (CFG.player ? CFG.player + ', ' : '') + CFG.story, ' ', 'Comenzi: INDICIU, LITERE, AJUTOR. In rest, scrie raspunsul si apasa Enter.'];\nsay(introLines, '', nextPuzzle);\n\nfunction nextPuzzle(){\n  idx++; attempts = 0; hintUsed = false;\n  if (idx >= CFG.puzzles.length) return finale();\n  var p = CFG.puzzles[idx];\n  var lines = [' ', '----------------------------------------------', '[' + (idx + 1) + '/' + CFG.puzzles.length + '] ' + (p.title || 'OBSTACOL').toUpperCase(), p.question];\n  if (p.type === 'tf') lines.push('(raspunde: ADEVARAT sau FALS)');\n  if (p.type === 'choice') { var o = choiceOpts(p); for (var i = 0; i \u003c o.length; i++) lines.push('  ' + (i + 1) + ') ' + o[i]); }\n  say(lines);\n}\n\nfunction finale(){\n  done = true;\n  if(CFG._campaign){\n    var s = totalStars; var L = finalWord().charAt(0);\n    say(['>> CAMERA REZOLVATA! Stele: ' + s + (L ? ' | Litera: ' + L : '')], 'ok', campaignDone);\n    return;\n  }\n  var w = finalWord().split('').join(' ');\n  var lines = [' ', bar, '   E V A D A R E   R E U S I T A', bar, 'Stele: ' + totalStars + ' / ' + (CFG.puzzles.length * 3)];\n  if (w) lines.push('Cuvantul magic: ' + w);\n  lines.push((CFG.player ? CFG.player + ', ' : '') + CFG.finalMessage);\n  lines.push(' ');\n  lines.push('Scrie RESTART pentru a juca din nou.');\n  say(lines, 'ok');\n  beep(true);\n}\n\ncmd.addEventListener('keydown', function(e){\n  if (e.key !== 'Enter') return;\n  var v = cmd.value.trim();\n  cmd.value = '';\n  if (!v) return;\n  echo('> ' + v, 'dim');\n  var n = norm(v);\n  if (done) { if (n === 'restart') location.reload(); else echo('Scrie RESTART pentru a juca din nou.', 'dim'); return; }\n  if (n === 'ajutor' || n === 'help') { say(['INDICIU = primesti un ajutor (dar pierzi stele)', 'LITERE  = literele adunate pana acum', 'Orice altceva e tratat ca raspuns.']); return; }\n  if (n === 'litere') { say(['Litere adunate: ' + collected()]); return; }\n  var p = CFG.puzzles[idx];\n  if (!p) return;\n  if (n === 'indiciu' || n === 'hint') {\n    if (p.hint) { hintUsed = true; say(['INDICIU: ' + p.hint], 'warn'); }\n    else say(['Nu exista niciun indiciu aici.'], 'warn');\n    return;\n  }\n  var given = v;\n  if (p.type === 'choice') { var num = parseInt(v, 10); var o = choiceOpts(p); if (num >= 1 && o[num - 1]) given = o[num - 1]; }\n  if (p.type === 'tf') { if (n === 'a' || n === 'adevarat') given = 'Adevarat'; if (n === 'f' || n === 'fals') given = 'Fals'; }\n  if (checkAnswer(p, given)) {\n    var s = starsFor(attempts, hintUsed);\n    totalStars += s; solved[idx] = true; beep(true);\n    var ls = ['>> ACCES PERMIS. +' + s + ' stele (total ' + totalStars + ')'];\n    var L = (p.letter || '').trim();\n    if (L) ls.push('>> AI GASIT LITERA: ' + L.toUpperCase() + '   [' + collected() + ']');\n    say(ls, 'ok', nextPuzzle);\n  } else {\n    attempts++; beep(false);\n    say(['>> ACCES RESPINS. Mai incearca.'], 'bad');\n  }\n});\nroomReady();\n\u003c/script>\n\u003c/body>\n\u003c/html>","arcade":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003chead>\n\u003cmeta charset=\"utf-8\">\n\u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\u003ctitle>\u003c/title>\n\u003cstyle>\n  * { box-sizing: border-box; }\n  body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 50% 0%, #1a0a40 0%, #080614 60%); color: #fff; font-family: ui-monospace, \"Courier New\", monospace; display: flex; flex-direction: column; align-items: center; }\n  h1 { font-size: 22px; margin: 12px 0 4px; letter-spacing: .12em; text-transform: uppercase; color: #fff; text-shadow: 0 0 12px var(--accent), 0 0 24px rgba(109,40,217,.5); }\n  #hud { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #c4b5fd; margin-bottom: 8px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }\n  #hudLetters { display: flex; gap: 4px; }\n  #hudLetters span { width: 32px; height: 32px; border-radius: 4px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); display: flex; align-items: center; justify-content: center; font-weight: 800; color: rgba(255,255,255,.4); font-size: 14px; }\n  #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 0 8px var(--accent); }\n  canvas { border: 4px solid var(--accent); border-radius: 4px; background: #0e0a22; max-width: calc(100vw - 16px); image-rendering: pixelated; box-shadow: 0 0 0 2px #080614, 0 0 20px rgba(109,40,217,.6), 0 0 40px rgba(109,40,217,.25), inset 0 0 30px rgba(0,0,0,.6); }\n  .help { font-size: 12px; color: #8b7fc0; margin: 8px 0 4px; text-align: center; padding: 0 10px; }\n  #dpad { display: flex; gap: 8px; margin: 6px 0 16px; flex-wrap: wrap; justify-content: center; }\n  #dpad button { width: 56px; height: 52px; font-size: 20px; border-radius: 6px; border: 2px solid #6d28d9; background: #1a1040; color: #c4b5fd; cursor: pointer; box-shadow: 0 4px 0 #0d0820, 0 0 8px rgba(109,40,217,.3); transition: transform .08s, box-shadow .08s; }\n  #dpad button:active { background: var(--accent); transform: translateY(2px); box-shadow: 0 2px 0 #0d0820, 0 0 12px var(--accent); }\n  #btnBomb { background: #7f1d1d; border-color: #b91c1c; }\n  @media (prefers-reduced-motion: reduce) { #dpad button { transition: none; } }\n  #goOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.82); z-index: 25; align-items: center; justify-content: center; padding: 16px; }\n  #goCard { background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 24px; text-align: center; max-width: 360px; font-family: system-ui, sans-serif; }\n  #goCard #goMsg { font-size: 20px; margin-bottom: 14px; }\n  #goCard button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 11px 18px; font-weight: 700; background: var(--accent); color: #fff; }\n\n  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }\n  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }\n  .shake { animation: shake .4s ease; }\n  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }\n  @media (prefers-reduced-motion: reduce){ .confetti{ display:none !important; } .shake{ animation:none !important; } }\n  #mOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.72); z-index: 20; align-items: center; justify-content: center; padding: 16px; }\n  #mCard { width: 100%; max-width: 460px; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 22px; color: #fff; font-family: system-ui, sans-serif; box-shadow: 0 18px 50px rgba(0,0,0,.5); }\n  #mCard .mtitle { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #c4b5fd; font-weight: 700; }\n  #mCard .mq { font-size: 18px; line-height: 1.45; margin: 8px 0 16px; }\n  #mCard input[type=text] { width: 100%; font: inherit; font-size: 17px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.3); color: #fff; text-align: center; box-sizing: border-box; }\n  #mCard input:focus { outline: 2px solid var(--accent); border-color: transparent; }\n  #mCard button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 11px 16px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; margin-top: 10px; box-sizing: border-box; }\n  #mCard button.opt { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); font-weight: 600; text-align: left; }\n  #mCard button.opt:hover { background: rgba(255,255,255,.2); }\n  #mCard .mfb { min-height: 20px; text-align: center; font-weight: 700; margin-top: 10px; }\n  #mCard .mfb.bad { color: #fda4af; } #mCard .mfb.good { color: #86efac; }\n  #mCard .mhint { background: none !important; color: rgba(255,255,255,.55) !important; font-weight: 600 !important; font-size: 13px; width: auto !important; display: block; margin: 10px auto 0; }\n  #mCard .mhinttext { background: rgba(255,255,255,.1); border-radius: 9px; padding: 9px 11px; font-size: 14px; margin-top: 8px; display: none; white-space: pre-line; }\n  #mCard .mclose { background: none !important; color: rgba(255,255,255,.4) !important; font-size: 12px; width: auto !important; margin: 6px auto 0; display: block; }\n  #fOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.88); z-index: 30; align-items: center; justify-content: center; padding: 16px; }\n  #fOverlay .fcard { width: 100%; max-width: 480px; text-align: center; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; padding: 28px; color: #fff; font-family: system-ui, sans-serif; }\n  #fOverlay h1 { margin: 0 0 8px; font-size: 26px; }\n  #fOverlay .fstars { font-size: 26px; letter-spacing: 4px; color: #fbbf24; margin: 6px 0; }\n  #fOverlay .fword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0; }\n  #fOverlay .fword span { width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards; }\n  @keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }\n  @media (prefers-reduced-motion: reduce){ #fOverlay .fword span{ animation:none !important; } }\n  #fOverlay p { color: rgba(255,255,255,.8); line-height: 1.5; }\n  #fOverlay button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; }\n\u003c/style>\n\u003c/head>\n\u003cbody>\n\u003ch1>\u003c/h1>\n\u003cdiv id=\"hud\">\u003cspan id=\"hudStep\">\u003c/span>\u003cspan id=\"hudStars\">\u003c/span>\u003cdiv id=\"hudLetters\">\u003c/div>\u003c/div>\n\u003ccanvas id=\"cv\">\u003c/canvas>\n\u003cdiv class=\"help\">Sageti / WASD = misca, Space sau &#128163; = bomba. Sparge cutiile (uneori cad bonusuri: &#128293; raza, &#128163; bombe in plus), evita dusmanii. Usile rosii = intrebari; cufarul auriu = scaparea.\u003c/div>\n\u003cdiv id=\"dpad\">\u003cbutton data-d=\"L\" aria-label=\"Stanga\">&#9664;\u003c/button>\u003cbutton data-d=\"U\" aria-label=\"Sus\">&#9650;\u003c/button>\u003cbutton data-d=\"D\" aria-label=\"Jos\">&#9660;\u003c/button>\u003cbutton data-d=\"R\" aria-label=\"Dreapta\">&#9654;\u003c/button>\u003cbutton id=\"btnBomb\" aria-label=\"Pune bomba\">&#128163;\u003c/button>\u003c/div>\n\u003cdiv id=\"goOverlay\">\u003cdiv id=\"goCard\">\u003cdiv id=\"goMsg\">\u003c/div>\u003cbutton id=\"goRestart\">Incearca din nou\u003c/button>\u003c/div>\u003c/div>\n\u003cdiv id=\"mOverlay\">\u003cdiv id=\"mCard\">\n  \u003cdiv class=\"mtitle\" id=\"mTitle\">\u003c/div>\n  \u003cdiv class=\"mq\" id=\"mQ\">\u003c/div>\n  \u003cdiv id=\"mAnswers\">\u003c/div>\n  \u003cdiv class=\"mfb\" id=\"mFeedback\">\u003c/div>\n  \u003cbutton class=\"mhint\" id=\"mHintBtn\">Vreau un indiciu\u003c/button>\n  \u003cdiv class=\"mhinttext\" id=\"mHintText\">\u003c/div>\n  \u003cbutton class=\"mclose\" id=\"mClose\">Pleaca de aici\u003c/button>\n\u003c/div>\u003c/div>\n\u003cdiv id=\"fOverlay\">\u003cdiv class=\"fcard\">\n  \u003ch1>Evadare reusita!\u003c/h1>\n  \u003cdiv class=\"fstars\" id=\"fStars\">\u003c/div>\n  \u003cdiv class=\"fword\" id=\"fWord\">\u003c/div>\n  \u003cp id=\"fMsg\">\u003c/p>\n  \u003cbutton id=\"fAgain\">Joaca din nou\u003c/button>\n\u003c/div>\u003c/div>\n\u003cscript>\nvar CFG = __CFG__;\ndocument.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');\nvar totalStars = 0;\nfunction el(id){ return document.getElementById(id); }\nfunction norm(s){ return String(s).trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.'); }\nfunction starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3); }\nfunction finalWord(){ var w = ''; for (var i = 0; i \u003c CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }\nfunction choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }\nfunction choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i \u003c ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }\nvar _lastGiven = '';\nfunction checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); var ok = norm(given) !== '' && norm(given) === norm(exp); if(ok){ _lastGiven = given; } return ok; }\nfunction beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }\nfunction confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i \u003c 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }\nfunction roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }\n/* Contract de finalizare a camerei — un singur loc pentru payload-ul parent.nextRoom\n   (înlocuiește duplicatele din showFinal/finale; D7). Citește totalStars + finalWord() la apel. */\nfunction campaignDone(){ if(CFG._campaign){ try{ var p = CFG.puzzles[0]; var bkey = '*'; if(p.type === 'tf'){ bkey = _lastGiven || 'Adevarat'; } else if(p.type === 'choice'){ var opts = choiceOpts(p); var bi = opts.findIndex(function(o){ return norm(o) === norm(_lastGiven); }); bkey = String(bi >= 0 ? bi : 0); } parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:finalWord().charAt(0), branch:bkey}); }catch(e){} } }\nwindow.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };\nif(CFG._campaign){\n  /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */\n  var _cs = document.createElement('style');\n  _cs.textContent = 'h1{display:none!important}.progress{display:none!important}.meta{display:none!important}';\n  (document.head || document.documentElement).appendChild(_cs);\n}\nvar N = CFG.puzzles.length;\n\n/* ===== Bomberman (S3 — port din scratch/bomberman-proto.html) =====\n   Păstrează contractul motorului: openPuzzle/onDoorSolved/showFinal/modalOpen/roomReady. */\nvar __seed = (typeof window.__seed === 'number') ? window.__seed : (Date.now() % 0xFFFFFF);\nwindow.__seed = __seed;\nfunction makePRNG(seed){ var s = seed >>> 0; return function(){ s |= 0; s = (s + 0x6d2b79f5) | 0; var t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }\nvar rng = makePRNG(__seed);\n\n/* ----- Efecte sonore arcade (WebAudio local; deblocat de gesturile din iframe) -----\n   beep(ok) din libJS ramane pentru raspuns corect/gresit; sfx() adauga bomba/explozie/powerup. */\nfunction sfx(type){\n  try {\n    var actx = sfx.ctx || (sfx.ctx = new (window.AudioContext || window.webkitAudioContext)());\n    if (actx.state === 'suspended') actx.resume();\n    var t = actx.currentTime;\n    function tone(wave, f0, f1, dur, vol){ var o = actx.createOscillator(), g = actx.createGain(); o.type = wave; o.frequency.setValueAtTime(f0, t); if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(f1, t + dur); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02); }\n    if (type === 'bomb'){ tone('square', 440, 150, 0.1, 0.07); }\n    else if (type === 'explosion'){\n      var dur = 0.45, sr = actx.sampleRate, buf = actx.createBuffer(1, Math.floor(sr * dur), sr), data = buf.getChannelData(0);\n      for (var i = 0; i \u003c data.length; i++){ var k = 1 - i / data.length; data[i] = (Math.random() * 2 - 1) * k * k; }\n      var src = actx.createBufferSource(); src.buffer = buf;\n      var lp = actx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(1100, t); lp.frequency.exponentialRampToValueAtTime(180, t + dur);\n      var g = actx.createGain(); g.gain.setValueAtTime(0.38, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);\n      src.connect(lp); lp.connect(g); g.connect(actx.destination); src.start(t);\n      tone('sine', 130, 42, 0.34, 0.3);\n    }\n    else if (type === 'enemy'){ tone('square', 200, 520, 0.14, 0.08); }\n    else if (type === 'powerup'){ var fs = [523, 659, 784, 1047]; for (var p = 0; p \u003c fs.length; p++){ var o = actx.createOscillator(), gg = actx.createGain(); o.type = 'triangle'; o.frequency.value = fs[p]; gg.gain.setValueAtTime(0.08, t + p * 0.06); gg.gain.exponentialRampToValueAtTime(0.0008, t + p * 0.06 + 0.13); o.connect(gg); gg.connect(actx.destination); o.start(t + p * 0.06); o.stop(t + p * 0.06 + 0.15); } }\n    else if (type === 'death'){ tone('sawtooth', 330, 55, 0.5, 0.12); }\n  } catch (e) {}\n}\n\nvar GW = 15, GH = 13, TS = 36;\nvar T_FLOOR = 0, T_WALL = 1, T_BOX = 2, T_DOOR = 3, T_CHEST = 4;\nvar BOMB_TIMER = 2400, EXPLOSION_TIME = 500, BASE_RANGE = 1, BASE_BOMBS = 1, POWERUP_CHANCE = 0.32, ENEMY_INTERVAL = 600, RESPAWN_DELAY = 1500, INVINCIBLE_TIME = 2000, MAX_LIVES = 3;\nvar NUM_DOORS = N, NUM_ENEMIES = Math.max(2, Math.min(4, N + 1));\nvar P_RANGE = 'range', P_BOMB = 'bomb';\n\nvar map, player, enemies, bombs, explosions, lives, gameOver, gameWon, puzzleProgress, doorMeta, chestPos, powerups, bombRange, maxBombs;\nvar animFrame, lastTime = 0, enemyTimer = 0, invincibleTimer = 0, bombIdCounter = 0;\n\nvar cv = el('cv'); cv.width = GW * TS; cv.height = GH * TS;\nvar ctx = cv.getContext('2d');\n\nfunction shuffle(arr){ for (var i = arr.length - 1; i > 0; i--){ var j = Math.floor(rng() * (i + 1)); var t = arr[i]; arr[i] = arr[j]; arr[j] = t; } return arr; }\n\nfunction buildMap(){\n  map = [];\n  for (var y = 0; y \u003c GH; y++){ map[y] = []; for (var x = 0; x \u003c GW; x++){ if (x === 0 || y === 0 || x === GW - 1 || y === GH - 1) map[y][x] = T_WALL; else if (x % 2 === 0 && y % 2 === 0) map[y][x] = T_WALL; else map[y][x] = T_FLOOR; } }\n  var freeCells = [];\n  for (var fy = 1; fy \u003c GH - 1; fy++) for (var fx = 1; fx \u003c GW - 1; fx++) if (map[fy][fx] === T_FLOOR) freeCells.push({ x: fx, y: fy });\n  var safeZone = [{x:1,y:1},{x:2,y:1},{x:1,y:2}];\n  function isSafe(c){ for (var i = 0; i \u003c safeZone.length; i++) if (safeZone[i].x === c.x && safeZone[i].y === c.y) return true; return false; }\n  var boxCandidates = freeCells.filter(function(c){ return !isSafe(c); });\n  shuffle(boxCandidates);\n  var boxCount = Math.floor(boxCandidates.length * 0.55);\n  for (var b = 0; b \u003c boxCount; b++) map[boxCandidates[b].y][boxCandidates[b].x] = T_BOX;\n  var stillFree = [];\n  for (var sy = 1; sy \u003c GH - 1; sy++) for (var sx = 1; sx \u003c GW - 1; sx++) if (map[sy][sx] === T_FLOOR && !isSafe({x:sx,y:sy})) stillFree.push({ x: sx, y: sy });\n  shuffle(stillFree);\n  doorMeta = [];\n  for (var d = 0; d \u003c NUM_DOORS && d \u003c stillFree.length; d++){ var c = stillFree[d]; map[c.y][c.x] = T_DOOR; doorMeta.push({ x: c.x, y: c.y, id: d }); }\n  var chestCandidates = [];\n  for (var qy = 1; qy \u003c GH - 1; qy++) for (var qx = 1; qx \u003c GW - 1; qx++) if (map[qy][qx] === T_FLOOR && !isSafe({x:qx,y:qy})) chestCandidates.push({ x: qx, y: qy, dist: (GW - 1 - qx) + (GH - 1 - qy) });\n  chestCandidates.sort(function(a,b){ return a.dist - b.dist; });\n  chestPos = chestCandidates.length > 0 ? chestCandidates[0] : { x: GW - 2, y: GH - 2 };\n  map[chestPos.y][chestPos.x] = T_CHEST;\n}\n\nfunction init(){\n  rng = makePRNG(__seed);\n  buildMap();\n  player = { x: 1, y: 1, alive: true, invincible: false };\n  var ec = [];\n  for (var y = 1; y \u003c GH - 1; y++) for (var x = 1; x \u003c GW - 1; x++) if (map[y][x] === T_FLOOR && (x > 3 || y > 3)) ec.push({ x: x, y: y });\n  shuffle(ec);\n  enemies = [];\n  for (var i = 0; i \u003c NUM_ENEMIES && i \u003c ec.length; i++) enemies.push({ x: ec[i].x, y: ec[i].y, alive: true, id: i });\n  bombs = []; explosions = []; powerups = []; bombRange = BASE_RANGE; maxBombs = BASE_BOMBS; lives = MAX_LIVES; gameOver = false; gameWon = false; enemyTimer = 0; invincibleTimer = 0; lastTime = 0;\n  if (!puzzleProgress) puzzleProgress = { doorsSolved: [] };\n  for (var dd = 0; dd \u003c doorMeta.length; dd++) if (puzzleProgress.doorsSolved[dd]) map[doorMeta[dd].y][doorMeta[dd].x] = T_FLOOR;\n  hideGameOver();\n  updateHud();\n  if (animFrame) cancelAnimationFrame(animFrame);\n  animFrame = requestAnimationFrame(gameLoop);\n}\n\nfunction respawn(){\n  if (lives \u003c= 0){ showGameOver(); return; }\n  player = { x: 1, y: 1, alive: true, invincible: true };\n  bombs = []; explosions = []; invincibleTimer = INVINCIBLE_TIME; gameOver = false;\n  updateHud();\n}\n\nfunction showGameOver(){ gameOver = true; el('goMsg').textContent = '\\ud83d\\udc80 Ai ramas fara vieti!'; el('goOverlay').style.display = 'flex'; }\nfunction hideGameOver(){ el('goOverlay').style.display = 'none'; }\nel('goRestart').onclick = function(){ init(); };\n\n/* ----- HUD (motor: hudStep/hudStars/hudLetters) ----- */\nfunction updateHud(){\n  var solved = puzzleProgress ? puzzleProgress.doorsSolved.filter(Boolean).length : 0;\n  var alive = enemies ? enemies.filter(function(e){ return e.alive; }).length : 0;\n  el('hudStep').textContent = '\\u2764\\ufe0f ' + lives + '   \\ud83d\\udc7e ' + alive + '   \\ud83d\\udd13 ' + solved + '/' + N + '   \\ud83d\\udca3' + (maxBombs || 1) + '   \\ud83d\\udd25' + (bombRange || 1);\n  hudLetters(function(j){ return puzzleProgress && puzzleProgress.doorsSolved[j]; });\n}\n\n/* ----- Bombe + explozii în lanț ----- */\nfunction placeBomb(){\n  if (!player.alive || gameOver || gameWon || modalOpen()) return;\n  if (bombs.length >= maxBombs) return;\n  for (var i = 0; i \u003c bombs.length; i++) if (bombs[i].x === player.x && bombs[i].y === player.y) return;\n  bombs.push({ x: player.x, y: player.y, timer: BOMB_TIMER, id: bombIdCounter++ });\n  sfx('bomb');\n  updateHud();\n}\nfunction explodeBomb(bomb){\n  bombs = bombs.filter(function(b){ return b.id !== bomb.id; });\n  var cells = [{ x: bomb.x, y: bomb.y }];\n  var brokenBoxes = [];\n  var dirs = [[1,0],[-1,0],[0,1],[0,-1]];\n  for (var d = 0; d \u003c dirs.length; d++){ var dx = dirs[d][0], dy = dirs[d][1]; for (var r = 1; r \u003c= bombRange; r++){ var cx = bomb.x + dx * r, cy = bomb.y + dy * r; if (cx \u003c 0 || cy \u003c 0 || cx >= GW || cy >= GH) break; var t = map[cy][cx]; if (t === T_WALL) break; cells.push({ x: cx, y: cy }); if (t === T_BOX){ map[cy][cx] = T_FLOOR; brokenBoxes.push({ x: cx, y: cy }); break; } if (t === T_DOOR || t === T_CHEST) break; } }\n  explosions.push({ cells: cells, endTime: performance.now() + EXPLOSION_TIME });\n  sfx('explosion');\n  var chain = bombs.slice();\n  for (var i = 0; i \u003c chain.length; i++){ var bb = chain[i]; for (var c = 0; c \u003c cells.length; c++) if (cells[c].x === bb.x && cells[c].y === bb.y){ explodeBomb(bb); break; } }\n  checkExplosionHits(cells);\n  /* drop DUPA checkExplosionHits: altfel powerup-ul de pe celula cutiei e sters instant de filtrul de explozie */\n  for (var bx = 0; bx \u003c brokenBoxes.length; bx++) maybeDropPowerup(brokenBoxes[bx].x, brokenBoxes[bx].y);\n  updateHud();\n}\nfunction checkExplosionHits(cells){\n  for (var c = 0; c \u003c cells.length; c++){ var cx = cells[c].x, cy = cells[c].y;\n    for (var i = 0; i \u003c enemies.length; i++) if (enemies[i].alive && enemies[i].x === cx && enemies[i].y === cy){ enemies[i].alive = false; sfx('enemy'); }\n    powerups = powerups.filter(function(p){ return !(p.x === cx && p.y === cy); });\n    if (player.alive && !player.invincible && player.x === cx && player.y === cy) killPlayer();\n  }\n}\nfunction maybeDropPowerup(x, y){\n  if (rng() >= POWERUP_CHANCE) return;\n  powerups.push({ x: x, y: y, type: rng() \u003c 0.5 ? P_RANGE : P_BOMB });\n}\nfunction pickupPowerup(){\n  for (var i = 0; i \u003c powerups.length; i++) if (powerups[i].x === player.x && powerups[i].y === player.y){\n    if (powerups[i].type === P_RANGE) bombRange++; else maxBombs++;\n    powerups.splice(i, 1); sfx('powerup'); updateHud(); return;\n  }\n}\nfunction killPlayer(){\n  if (!player.alive) return;\n  player.alive = false; lives--; sfx('death'); updateHud();\n  setTimeout(function(){ if (lives > 0) respawn(); else showGameOver(); }, RESPAWN_DELAY);\n}\n\n/* ----- Mișcare jucător + uși (puzzle) / cufăr (scăpare) ----- */\nfunction movePlayer(dir){\n  if (!player.alive || gameOver || gameWon || modalOpen()) return;\n  var dx = 0, dy = 0;\n  if (dir === 'U') dy = -1; else if (dir === 'D') dy = 1; else if (dir === 'L') dx = -1; else if (dir === 'R') dx = 1;\n  var nx = player.x + dx, ny = player.y + dy;\n  if (nx \u003c 0 || ny \u003c 0 || nx >= GW || ny >= GH) return;\n  var t = map[ny][nx];\n  if (t === T_WALL || t === T_BOX) return;\n  for (var i = 0; i \u003c bombs.length; i++) if (bombs[i].x === nx && bombs[i].y === ny) return;\n  if (t === T_DOOR){ for (var d = 0; d \u003c doorMeta.length; d++) if (doorMeta[d].x === nx && doorMeta[d].y === ny){ if (!puzzleProgress.doorsSolved[d]) openPuzzle(d, onDoorSolved); return; } return; }\n  if (t === T_CHEST){ player.x = nx; player.y = ny; gameWon = true; showFinal(); return; }\n  player.x = nx; player.y = ny;\n  pickupPowerup();\n  checkPlayerEnemyCollision();\n}\nfunction onDoorSolved(id){\n  if (!puzzleProgress) puzzleProgress = { doorsSolved: [] };\n  puzzleProgress.doorsSolved[id] = true;\n  if (doorMeta && doorMeta[id]) map[doorMeta[id].y][doorMeta[id].x] = T_FLOOR;\n  updateHud();\n}\n\n/* ----- AI dușmani: BFS spre jucător (doar pe podea) ----- */\nfunction moveEnemies(){ if (gameOver || gameWon) return; for (var i = 0; i \u003c enemies.length; i++){ var e = enemies[i]; if (!e.alive) continue; var next = bfsStep(e.x, e.y, player.x, player.y); if (next){ e.x = next.x; e.y = next.y; } } checkPlayerEnemyCollision(); }\nfunction bfsStep(sx, sy, tx, ty){\n  if (sx === tx && sy === ty) return null;\n  var visited = {}; var queue = [{ x: sx, y: sy, step: null }]; visited[sy + ',' + sx] = true;\n  var dirs = [[1,0],[-1,0],[0,1],[0,-1]];\n  while (queue.length > 0){ var cur = queue.shift(); for (var d = 0; d \u003c dirs.length; d++){ var nx = cur.x + dirs[d][0], ny = cur.y + dirs[d][1]; var key = ny + ',' + nx; if (nx \u003c 0 || ny \u003c 0 || nx >= GW || ny >= GH) continue; if (visited[key]) continue; if (map[ny][nx] !== T_FLOOR) continue; var hb = false; for (var bi = 0; bi \u003c bombs.length; bi++) if (bombs[bi].x === nx && bombs[bi].y === ny){ hb = true; break; } if (hb) continue; var he = false; for (var ei = 0; ei \u003c enemies.length; ei++) if (enemies[ei].alive && enemies[ei].x === nx && enemies[ei].y === ny){ he = true; break; } if (he) continue; visited[key] = true; var step = cur.step || { x: nx, y: ny }; if (nx === tx && ny === ty) return step; queue.push({ x: nx, y: ny, step: step }); } }\n  return null;\n}\nfunction checkPlayerEnemyCollision(){ if (!player.alive || player.invincible) return; for (var i = 0; i \u003c enemies.length; i++) if (enemies[i].alive && enemies[i].x === player.x && enemies[i].y === player.y){ killPlayer(); return; } }\n\n/* ----- Game loop ----- */\nfunction gameLoop(now){\n  var dt = now - (lastTime || now); lastTime = now;\n  if (!gameOver && !gameWon){\n    if (player.invincible && invincibleTimer > 0){ invincibleTimer -= dt; if (invincibleTimer \u003c= 0){ player.invincible = false; invincibleTimer = 0; checkPlayerEnemyCollision(); } }\n    var explodeList = [];\n    for (var i = 0; i \u003c bombs.length; i++){ bombs[i].timer -= dt; if (bombs[i].timer \u003c= 0) explodeList.push(bombs[i]); }\n    for (var k = 0; k \u003c explodeList.length; k++) explodeBomb(explodeList[k]);\n    var nowMs = performance.now();\n    explosions = explosions.filter(function(ex){ return ex.endTime > nowMs; });\n    if (!modalOpen() && player.alive){ enemyTimer += dt; if (enemyTimer >= ENEMY_INTERVAL){ enemyTimer = 0; moveEnemies(); } }\n  }\n  draw(now); updateHud();\n  animFrame = requestAnimationFrame(gameLoop);\n}\n\n/* ----- Desenare ----- */\nfunction draw(now){\n  ctx.clearRect(0, 0, cv.width, cv.height);\n  var expSet = {}; var nowMs = performance.now();\n  for (var ex = 0; ex \u003c explosions.length; ex++) if (explosions[ex].endTime > nowMs){ var cs = explosions[ex].cells; for (var c = 0; c \u003c cs.length; c++) expSet[cs[c].y + ',' + cs[c].x] = true; }\n  for (var y = 0; y \u003c GH; y++) for (var x = 0; x \u003c GW; x++){ var px = x * TS, py = y * TS, t = map[y][x], isExp = expSet[y + ',' + x];\n    if (t === T_WALL) drawWall(px, py, y);\n    else if (t === T_BOX) drawBox(px, py, isExp);\n    else if (t === T_DOOR){ drawFloor(px, py, x, y, isExp); drawDoor(px, py); }\n    else if (t === T_CHEST){ drawFloor(px, py, x, y, isExp); drawChest(px, py); }\n    else drawFloor(px, py, x, y, isExp);\n  }\n  for (var pu = 0; pu \u003c powerups.length; pu++) drawPowerup(powerups[pu], now);\n  for (var bi = 0; bi \u003c bombs.length; bi++) drawBomb(bombs[bi], now);\n  for (var en = 0; en \u003c enemies.length; en++) if (enemies[en].alive) drawEnemy(enemies[en]);\n  if (player.alive) drawPlayer(now);\n}\nfunction drawWall(px, py, y){ ctx.fillStyle = '#33215f'; ctx.fillRect(px, py, TS, TS); ctx.fillStyle = '#241646'; ctx.fillRect(px, py + TS/2 - 1, TS, 2); ctx.fillRect(px + ((y%2) ? TS/2 : TS/4) - 1, py, 2, TS/2 - 1); ctx.fillRect(px + ((y%2) ? TS/4 : 3*TS/4) - 1, py + TS/2, 2, TS/2); }\nfunction drawFloor(px, py, x, y, isExp){ if (isExp){ ctx.fillStyle = '#f97316'; ctx.fillRect(px, py, TS, TS); ctx.fillStyle = '#fef08a'; ctx.fillRect(px + TS/4, py + TS/4, TS/2, TS/2); } else { ctx.fillStyle = ((x + y) % 2) ? '#191130' : '#1c1336'; ctx.fillRect(px, py, TS, TS); } }\nfunction drawBox(px, py, isExp){ if (isExp){ ctx.fillStyle = '#f97316'; ctx.fillRect(px, py, TS, TS); return; } ctx.fillStyle = '#78350f'; ctx.fillRect(px, py, TS, TS); ctx.fillStyle = '#92400e'; ctx.fillRect(px+2, py+2, TS-4, TS-4); ctx.strokeStyle = '#d97706'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px+4, py+4); ctx.lineTo(px+TS-4, py+TS-4); ctx.moveTo(px+TS-4, py+4); ctx.lineTo(px+4, py+TS-4); ctx.stroke(); }\nfunction drawDoor(px, py){ ctx.fillStyle = '#9f1239'; ctx.fillRect(px+3, py+2, TS-6, TS-4); ctx.fillStyle = '#e11d48'; ctx.fillRect(px+6, py+5, TS-12, TS-10); ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+TS/2-2, py+TS/2-2, 4, 7); }\nfunction drawChest(px, py){ ctx.fillStyle = '#92400e'; ctx.fillRect(px+4, py+8, TS-8, TS-14); ctx.fillStyle = '#f59e0b'; ctx.fillRect(px+4, py+8, TS-8, 8); ctx.fillStyle = '#fde68a'; ctx.fillRect(px+TS/2-3, py+11, 6, 10); ctx.fillStyle = '#fbbf24'; ctx.fillRect(px+TS/2-2, py+13, 4, 4); }\nfunction drawBomb(bomb, now){ var px = bomb.x * TS, py = bomb.y * TS; var pulse = Math.sin(now / 150) * 0.3 + 0.7; ctx.fillStyle = 'rgba(30,10,10,' + pulse + ')'; ctx.beginPath(); ctx.arc(px + TS/2, py + TS/2, TS/2 - 4, 0, Math.PI*2); ctx.fill(); ctx.strokeStyle = '#f87171'; ctx.lineWidth = 2; ctx.stroke(); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(px + TS/2 + 4, py + 6); ctx.quadraticCurveTo(px + TS/2 + 10, py + 2, px + TS/2 + 7, py - 2); ctx.stroke(); }\nfunction drawPowerup(p, now){ var px = p.x * TS, py = p.y * TS, cx = px + TS/2, cy = py + TS/2, pulse = Math.sin(now / 200) * 0.12 + 0.88; var isR = p.type === P_RANGE; ctx.fillStyle = isR ? 'rgba(249,115,22,.25)' : 'rgba(59,130,246,.25)'; ctx.fillRect(px + 3, py + 3, TS - 6, TS - 6); ctx.fillStyle = isR ? '#f97316' : '#3b82f6'; ctx.beginPath(); ctx.arc(cx, cy, (TS/2 - 6) * pulse, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#fff'; if (isR){ ctx.beginPath(); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx + 5, cy + 6); ctx.lineTo(cx, cy + 2); ctx.lineTo(cx - 5, cy + 6); ctx.closePath(); ctx.fill(); } else { ctx.beginPath(); ctx.arc(cx, cy + 1, 5, 0, Math.PI*2); ctx.fill(); ctx.fillRect(cx - 1, cy - 8, 2, 4); } }\nfunction drawEnemy(e){ var px = e.x * TS, py = e.y * TS; ctx.fillStyle = '#dc2626'; ctx.fillRect(px+6, py+8, TS-12, TS-12); ctx.fillStyle = '#fff'; ctx.fillRect(px+9, py+12, 4, 4); ctx.fillRect(px+TS-13, py+12, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(px+10, py+13, 2, 2); ctx.fillRect(px+TS-12, py+13, 2, 2); ctx.fillStyle = '#b91c1c'; ctx.fillRect(px+8, py+TS-8, 4, 5); ctx.fillRect(px+TS-12, py+TS-8, 4, 5); }\nfunction drawPlayer(now){ var px = player.x * TS, py = player.y * TS; if (player.invincible && Math.floor(now / 100) % 2 === 0) return; ctx.fillStyle = CFG.color || '#6d28d9'; ctx.fillRect(px+6, py+5, TS-12, TS-10); ctx.fillStyle = '#fff'; ctx.fillRect(px+10, py+10, 4, 4); ctx.fillRect(px+TS-14, py+10, 4, 4); ctx.fillStyle = '#000'; ctx.fillRect(px+11, py+11, 2, 2); ctx.fillRect(px+TS-13, py+11, 2, 2); ctx.fillStyle = '#fff'; ctx.fillRect(px+11, py+TS-12, TS-22, 3); }\n\n/* ----- Input ----- */\nwindow.addEventListener('keydown', function(e){\n  if (modalOpen()) return;\n  var dir = { ArrowUp:'U', ArrowDown:'D', ArrowLeft:'L', ArrowRight:'R', w:'U', s:'D', a:'L', d:'R' }[e.key];\n  if (dir){ e.preventDefault(); movePlayer(dir); return; }\n  if (e.key === ' ' || e.key === 'b' || e.key === 'B'){ e.preventDefault(); placeBomb(); }\n});\ndocument.querySelectorAll('#dpad button[data-d]').forEach(function(b){ b.addEventListener('click', function(){ movePlayer(b.dataset.d); }); });\nel('btnBomb').addEventListener('click', function(){ placeBomb(); });\n\n/* ----- Hooks de test (window.__game) ----- */\nwindow.__game = {\n  get lives(){ return lives; },\n  get enemiesCount(){ return enemies ? enemies.filter(function(e){ return e.alive; }).length : 0; },\n  get puzzleProgress(){ return puzzleProgress; },\n  get bombs(){ return bombs ? bombs.slice() : []; },\n  get powerups(){ return powerups ? powerups.slice() : []; },\n  get bombRange(){ return bombRange; },\n  get maxBombs(){ return maxBombs; },\n  dropPowerupAt: function(x, y, type){ powerups.push({ x: x, y: y, type: type || P_RANGE }); },\n  get gameOver(){ return gameOver; },\n  get gameWon(){ return gameWon; },\n  get player(){ return player ? { x: player.x, y: player.y, alive: player.alive, invincible: player.invincible } : null; },\n  get map(){ return map ? map.map(function(r){ return r.slice(); }) : []; },\n  get enemies(){ return enemies ? enemies.slice() : []; },\n  get explosions(){ return explosions ? explosions.slice() : []; },\n  placeBomb: function(){ placeBomb(); },\n  movePlayer: function(dir){ movePlayer(dir); },\n  explodeAllBombs: function(){ var list = bombs.slice(); for (var i = 0; i \u003c list.length; i++) explodeBomb(list[i]); },\n  spawnEnemyAt: function(x, y){ enemies.push({ x: x, y: y, alive: true, id: 999 + enemies.length }); },\n  killPlayer: function(){ killPlayer(); },\n  restartWithSeed: function(seed){ __seed = seed; window.__seed = seed; puzzleProgress = null; init(); },\n  getDoorAt: function(x, y){ for (var d = 0; d \u003c doorMeta.length; d++) if (doorMeta[d].x === x && doorMeta[d].y === y) return d; return -1; },\n  solveDoor: function(id){ onDoorSolved(id); },\n  teleportPlayer: function(x, y){ player.x = x; player.y = y; },\n  bfsStep: function(sx, sy, tx, ty){ return bfsStep(sx, sy, tx, ty); },\n  setTile: function(x, y, t){ if (map && map[y]) map[y][x] = t; },\n  getTile: function(x, y){ return map && map[y] ? map[y][x] : -1; }\n};\n\nfunction hudLetters(isSolved){\n  el('hudStars').textContent = totalStars + ' \\u2605';\n  var hb = el('hudLetters'); hb.innerHTML = '';\n  for (var j = 0; j \u003c CFG.puzzles.length; j++){\n    var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue;\n    var s = document.createElement('span');\n    if (isSolved(j)){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?';\n    hb.appendChild(s);\n  }\n}\nvar mIdx = -1, mAtt = 0, mHint = false, mCb = null;\nel('mHintBtn').onclick = function(){ mHint = true; el('mHintText').style.display = 'block'; };\nel('mClose').onclick = function(){ el('mOverlay').style.display = 'none'; };\nfunction modalOpen(){ return el('mOverlay').style.display === 'flex'; }\nfunction openPuzzle(i, cb){\n  mIdx = i; mAtt = 0; mHint = false; mCb = cb;\n  var p = CFG.puzzles[i];\n  el('mTitle').textContent = p.title || ('Puzzle ' + (i + 1));\n  el('mQ').textContent = p.question;\n  el('mFeedback').textContent = ''; el('mFeedback').className = 'mfb';\n  el('mHintText').style.display = 'none'; el('mHintText').textContent = p.hint || '';\n  el('mHintBtn').style.display = p.hint ? '' : 'none';\n  var box = el('mAnswers'); box.innerHTML = '';\n  if (p.type === 'free') {\n    var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = 'Scrie raspunsul...'; inp.autocomplete = 'off';\n    var b = document.createElement('button'); b.textContent = 'Verifica';\n    b.onclick = function(){ mCheck(inp.value); };\n    inp.onkeydown = function(e){ e.stopPropagation(); if (e.key === 'Enter') b.click(); };\n    box.appendChild(inp); box.appendChild(b);\n    setTimeout(function(){ inp.focus(); }, 60);\n  } else if (p.type === 'tf') {\n    ['Adevarat', 'Fals'].forEach(function(v){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = v; b.onclick = function(){ mCheck(v); }; box.appendChild(b); });\n  } else {\n    choiceOpts(p).forEach(function(o){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = o; b.onclick = function(){ mCheck(o); }; box.appendChild(b); });\n  }\n  el('mOverlay').style.display = 'flex';\n}\nfunction mCheck(given){\n  var p = CFG.puzzles[mIdx];\n  if (checkAnswer(p, given)) {\n    var s = starsFor(mAtt, mHint);\n    totalStars += s; beep(true);\n    el('mFeedback').textContent = 'Corect! +' + s + ' \\u2605'; el('mFeedback').className = 'mfb good';\n    setTimeout(function(){ el('mOverlay').style.display = 'none'; var cb = mCb; mCb = null; if (cb) cb(mIdx, s); }, 750);\n  } else {\n    mAtt++; beep(false);\n    el('mFeedback').textContent = 'Nu e bine, mai incearca!'; el('mFeedback').className = 'mfb bad';\n    var c = el('mCard'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');\n  }\n}\nfunction showFinal(){\n  if(CFG._campaign){ campaignDone(); return; }\n  el('fStars').textContent = totalStars + ' / ' + (CFG.puzzles.length * 3) + ' \\u2605';\n  var w = finalWord(); var bw = el('fWord'); bw.innerHTML = '';\n  for (var j = 0; j \u003c w.length; j++){ var s = document.createElement('span'); s.textContent = w.charAt(j); s.style.animationDelay = (j * 0.18) + 's'; bw.appendChild(s); }\n  var msg = CFG.finalMessage || '';\n  el('fMsg').textContent = CFG.player ? CFG.player + ', ' + msg.charAt(0).toLowerCase() + msg.slice(1) : msg;\n  el('fOverlay').style.display = 'flex';\n  beep(true); confetti();\n}\nel('fAgain').onclick = function(){ location.reload(); };\ninit();\nroomReady();\n\u003c/script>\n\u003c/body>\n\u003c/html>","chat":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003chead>\n\u003cmeta charset=\"utf-8\">\n\u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\u003ctitle>\u003c/title>\n\u003cstyle>\n  * { box-sizing: border-box; }\n  body { margin: 0; background: #060d1a; font-family: system-ui, -apple-system, \"Segoe UI\", sans-serif; color: #e2e8f0; display: flex; justify-content: center; min-height: 100vh; }\n  #app { width: 100%; max-width: 480px; height: 100vh; height: 100dvh; display: flex; flex-direction: column; background: #0d1626; }\n  header { display: flex; gap: 10px; align-items: center; padding: 10px 14px; background: rgba(23,32,53,.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,.08); box-shadow: 0 1px 0 rgba(255,255,255,.05); }\n  .avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.15); }\n  .cname { font-weight: 700; }\n  .cstatus { font-size: 12px; color: #34d399; }\n  #msgs { flex: 1; overflow-y: auto; padding: 14px 12px; display: flex; flex-direction: column; gap: 8px; }\n  .row { display: flex; }\n  .row.me { justify-content: flex-end; }\n  .bub { max-width: 78%; padding: 9px 13px; border-radius: 16px; line-height: 1.4; font-size: 15px; white-space: pre-line; animation: bin .25s cubic-bezier(.22,1,.36,1); }\n  @keyframes bin { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }\n  .row.him .bub { background: #1e2d45; border: 1px solid rgba(255,255,255,.08); box-shadow: 0 2px 8px rgba(0,0,0,.25); color: #e2e8f0; border-bottom-left-radius: 5px; }\n  .row.me .bub { background: var(--accent); color: #fff; box-shadow: 0 2px 12px rgba(109,40,217,.4); border-bottom-right-radius: 5px; }\n  .bub.tile { font-size: 28px; font-weight: 900; letter-spacing: 3px; padding: 14px 20px; background: linear-gradient(135deg, #14532d, #166534); border: 1px solid #22c55e; box-shadow: 0 0 16px rgba(34,197,94,.3); animation: tile-pop .4s cubic-bezier(.34,1.56,.64,1); }\n  @keyframes tile-pop { from { transform: scale(.6) rotate(-5deg); opacity: 0; } to { transform: none; opacity: 1; } }\n  .bub.typing i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #64748b; margin: 0 2px; animation: tp 1s infinite; }\n  .bub.typing i:nth-child(2) { animation-delay: .15s; } .bub.typing i:nth-child(3) { animation-delay: .3s; }\n  @keyframes tp { 30% { transform: translateY(-6px); background: #34d399; } }\n  #composer { padding: 10px 12px; background: rgba(23,32,53,.9); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-top: 1px solid rgba(255,255,255,.08); display: flex; flex-wrap: wrap; gap: 8px; min-height: 58px; }\n  #composer input { flex: 1; min-width: 120px; min-height: 44px; font: inherit; font-size: 15px; padding: 9px 13px; border-radius: 99px; border: 1px solid #334155; background: rgba(13,22,38,.8); color: #fff; }\n  #composer input:focus { outline: 2px solid var(--accent); outline-offset: 2px; border-color: transparent; }\n  #composer button { font: inherit; cursor: pointer; border: none; border-radius: 99px; padding: 9px 16px; min-height: 44px; min-width: 44px; font-weight: 600; background: var(--accent); color: #fff; }\n  #composer button.chip { background: #0d1626; border: 1px solid #334155; color: #cbd5e1; min-height: 44px; }\n  #composer button.chip:hover { border-color: var(--accent); color: #fff; }\n  @media (prefers-reduced-motion: reduce) { .bub, .bub.tile, .bub.typing i { animation: none; } }\n\n  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }\n  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }\n  .shake { animation: shake .4s ease; }\n  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }\n  @media (prefers-reduced-motion: reduce){ .confetti{ display:none !important; } .shake{ animation:none !important; } }\n  #fOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.88); z-index: 30; align-items: center; justify-content: center; padding: 16px; }\n  #fOverlay .fcard { width: 100%; max-width: 480px; text-align: center; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; padding: 28px; color: #fff; font-family: system-ui, sans-serif; }\n  #fOverlay h1 { margin: 0 0 8px; font-size: 26px; }\n  #fOverlay .fstars { font-size: 26px; letter-spacing: 4px; color: #fbbf24; margin: 6px 0; }\n  #fOverlay .fword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0; }\n  #fOverlay .fword span { width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards; }\n  @keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }\n  @media (prefers-reduced-motion: reduce){ #fOverlay .fword span{ animation:none !important; } }\n  #fOverlay p { color: rgba(255,255,255,.8); line-height: 1.5; }\n  #fOverlay button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; }\n\u003c/style>\n\u003c/head>\n\u003cbody>\n\u003cdiv id=\"app\">\n  \u003cheader>\u003cdiv class=\"avatar\" id=\"av\">\u003c/div>\u003cdiv>\u003cdiv class=\"cname\" id=\"cn\">\u003c/div>\u003cdiv class=\"cstatus\" id=\"cs\">online\u003c/div>\u003c/div>\u003c/header>\n  \u003cdiv id=\"msgs\">\u003c/div>\n  \u003cdiv id=\"composer\">\u003c/div>\n\u003c/div>\n\u003cdiv id=\"fOverlay\">\u003cdiv class=\"fcard\">\n  \u003ch1>Evadare reusita!\u003c/h1>\n  \u003cdiv class=\"fstars\" id=\"fStars\">\u003c/div>\n  \u003cdiv class=\"fword\" id=\"fWord\">\u003c/div>\n  \u003cp id=\"fMsg\">\u003c/p>\n  \u003cbutton id=\"fAgain\">Joaca din nou\u003c/button>\n\u003c/div>\u003c/div>\n\u003cscript>\nvar CFG = __CFG__;\ndocument.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');\nvar totalStars = 0;\nfunction el(id){ return document.getElementById(id); }\nfunction norm(s){ return String(s).trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.'); }\nfunction starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3); }\nfunction finalWord(){ var w = ''; for (var i = 0; i \u003c CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }\nfunction choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }\nfunction choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i \u003c ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }\nvar _lastGiven = '';\nfunction checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); var ok = norm(given) !== '' && norm(given) === norm(exp); if(ok){ _lastGiven = given; } return ok; }\nfunction beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }\nfunction confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i \u003c 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }\nfunction roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }\n/* Contract de finalizare a camerei — un singur loc pentru payload-ul parent.nextRoom\n   (înlocuiește duplicatele din showFinal/finale; D7). Citește totalStars + finalWord() la apel. */\nfunction campaignDone(){ if(CFG._campaign){ try{ var p = CFG.puzzles[0]; var bkey = '*'; if(p.type === 'tf'){ bkey = _lastGiven || 'Adevarat'; } else if(p.type === 'choice'){ var opts = choiceOpts(p); var bi = opts.findIndex(function(o){ return norm(o) === norm(_lastGiven); }); bkey = String(bi >= 0 ? bi : 0); } parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:finalWord().charAt(0), branch:bkey}); }catch(e){} } }\nwindow.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };\nif(CFG._campaign){\n  /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */\n  var _cs = document.createElement('style');\n  _cs.textContent = 'h1{display:none!important}.progress{display:none!important}.meta{display:none!important}';\n  (document.head || document.documentElement).appendChild(_cs);\n}\nvar who = (CFG.charName || 'Alex').trim() || 'Alex';\nel('cn').textContent = who; el('av').textContent = who.charAt(0).toUpperCase();\nvar msgs = el('msgs'), composer = el('composer');\nvar idx = -1, attempts = 0, hintUsed = false;\nvar wrongs = ['Nu... nu a mers. Mai incearca!', 'Hmm, nu e asta. Gandeste-te bine!', 'Tot incuiat. Alta idee?'];\n\nfunction scrollEnd(){ msgs.scrollTop = msgs.scrollHeight; }\nfunction bubble(side, text, cls){\n  var r = document.createElement('div'); r.className = 'row ' + side;\n  var b = document.createElement('div'); b.className = 'bub' + (cls ? ' ' + cls : '');\n  b.textContent = text;\n  r.appendChild(b); msgs.appendChild(r); scrollEnd();\n  return b;\n}\nfunction charMsg(text, cb){\n  el('cs').textContent = 'scrie...';\n  var b = bubble('him', '', 'typing');\n  b.innerHTML = '\u003ci>\u003c/i>\u003ci>\u003c/i>\u003ci>\u003c/i>';\n  var d = Math.min(450 + text.length * 14, 1800);\n  setTimeout(function(){\n    b.className = 'bub'; b.textContent = text;\n    el('cs').textContent = 'online'; scrollEnd();\n    if (cb) setTimeout(cb, 280);\n  }, d);\n}\nfunction seq(texts, cb){ var i = 0; (function n(){ if (i >= texts.length) { if (cb) cb(); return; } charMsg(texts[i++], n); })(); }\n\nfunction storyChunks(){\n  var parts = (CFG.story || '').match(/[^.!?]+[.!?]*\\s*/g) || [];\n  var out = [], cur = '';\n  for (var i = 0; i \u003c parts.length; i++) {\n    if (cur && (cur + parts[i]).length > 110) { out.push(cur.trim()); cur = ''; }\n    cur += parts[i];\n  }\n  if (cur.trim()) out.push(cur.trim());\n  return out.length ? out : [CFG.story || ''];\n}\n\nfunction setComposer(p){\n  composer.innerHTML = '';\n  function chip(label, fn, cls){ var b = document.createElement('button'); if (cls) b.className = cls; b.textContent = label; b.onclick = fn; composer.appendChild(b); return b; }\n  if (p.type === 'free') {\n    var inp = document.createElement('input'); inp.placeholder = 'Scrie raspunsul...'; inp.autocomplete = 'off';\n    composer.appendChild(inp);\n    var send = chip('Trimite', function(){ if (inp.value.trim()) { var v = inp.value.trim(); inp.value = ''; answer(v); } });\n    inp.onkeydown = function(e){ if (e.key === 'Enter') send.click(); };\n    setTimeout(function(){ inp.focus(); }, 100);\n  } else if (p.type === 'tf') {\n    chip('Adevarat', function(){ answer('Adevarat'); }, 'chip');\n    chip('Fals', function(){ answer('Fals'); }, 'chip');\n  } else {\n    choiceOpts(p).forEach(function(o){ chip(o, function(){ answer(o); }, 'chip'); });\n  }\n  if (p.hint) chip('Cere un indiciu', function(){ hintUsed = true; bubble('me', 'Ai vreun indiciu?'); composer.innerHTML = ''; charMsg(p.hint, function(){ setComposer(p); }); }, 'chip');\n}\n\nfunction answer(given){\n  var p = CFG.puzzles[idx];\n  bubble('me', given);\n  composer.innerHTML = '';\n  if (checkAnswer(p, given)) {\n    var s = starsFor(attempts, hintUsed);\n    totalStars += s; beep(true);\n    var L = (p.letter || '').trim();\n    charMsg('Da! Asta era! (+' + s + ' \\u2605, total ' + totalStars + ')', function(){\n      if (L) { bubble('him', L.toUpperCase(), 'tile'); charMsg('Am gasit o litera!', next); }\n      else next();\n    });\n  } else {\n    attempts++; beep(false);\n    charMsg(wrongs[(attempts - 1) % wrongs.length], function(){ setComposer(p); });\n  }\n}\n\nfunction next(){\n  idx++; attempts = 0; hintUsed = false;\n  if (idx >= CFG.puzzles.length) {\n    seq(['AM IESIT! Multumesc' + (CFG.player ? ', ' + CFG.player : '') + '!', CFG.finalMessage || ''], function(){ showFinal(); });\n    return;\n  }\n  var p = CFG.puzzles[idx];\n  seq([(p.title ? p.title + '. ' : '') + p.question], function(){ setComposer(p); });\n}\n\nvar chatIntro = CFG._campaign\n  ? ['Camera ' + (CFG._campaign.idx + 1) + ' din ' + CFG._campaign.total + '. Sa incepem!']\n  : ['Salut' + (CFG.player ? ', ' + CFG.player : '') + '!'].concat(storyChunks()).concat(['Ma ajuti sa ies de aici?']);\nseq(chatIntro, next);\nfunction showFinal(){\n  if(CFG._campaign){ campaignDone(); return; }\n  el('fStars').textContent = totalStars + ' / ' + (CFG.puzzles.length * 3) + ' \\u2605';\n  var w = finalWord(); var bw = el('fWord'); bw.innerHTML = '';\n  for (var j = 0; j \u003c w.length; j++){ var s = document.createElement('span'); s.textContent = w.charAt(j); s.style.animationDelay = (j * 0.18) + 's'; bw.appendChild(s); }\n  var msg = CFG.finalMessage || '';\n  el('fMsg').textContent = CFG.player ? CFG.player + ', ' + msg.charAt(0).toLowerCase() + msg.slice(1) : msg;\n  el('fOverlay').style.display = 'flex';\n  beep(true); confetti();\n}\nel('fAgain').onclick = function(){ location.reload(); };\nroomReady();\n\u003c/script>\n\u003c/body>\n\u003c/html>","point":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003chead>\n\u003cmeta charset=\"utf-8\">\n\u003cmeta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\u003ctitle>\u003c/title>\n\u003cstyle>\n  * { box-sizing: border-box; }\n  body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, #0a0618 0%, #150d30 100%); color: #fff; font-family: system-ui, -apple-system, \"Segoe UI\", sans-serif; display: flex; flex-direction: column; align-items: center; }\n  h1 { font-size: 20px; margin: 14px 0 4px; color: #e8deff; letter-spacing: .04em; text-shadow: 0 2px 8px rgba(0,0,0,.6); }\n  #hud { display: flex; gap: 16px; align-items: center; font-size: 13px; color: #d4c8f8; margin-bottom: 4px; flex-wrap: wrap; justify-content: center; padding: 0 10px; }\n  #hudLetters { display: flex; gap: 4px; }\n  #hudLetters span { width: 26px; height: 30px; border-radius: 6px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; font-weight: 700; color: rgba(255,255,255,.4); font-size: 13px; }\n  #hudLetters span.won { background: var(--accent); color: #fff; border-color: transparent; box-shadow: 0 0 10px var(--accent); }\n  .note { font-size: 13px; color: #a89fd4; margin: 2px 0 10px; text-align: center; padding: 0 12px; min-height: 18px; }\n  #stage { width: 100%; max-width: 860px; padding: 0 10px 20px; }\n  svg { width: 100%; height: auto; border-radius: 12px; box-shadow: 0 14px 40px rgba(0,0,0,.5); display: block; }\n  .hot { cursor: pointer; }\n  .hot:hover { filter: brightness(1.5) drop-shadow(0 0 8px rgba(255,220,100,.5)); transition: filter .15s; }\n  .hot.done { opacity: .85; cursor: default; }\n  .hot.done:hover { filter: none; }\n  #door { cursor: pointer; }\n  #door.open { filter: drop-shadow(0 0 18px rgba(34,197,94,.5)) drop-shadow(0 0 6px #fff); animation: door-glow 2s ease-in-out infinite alternate; }\n  @keyframes door-glow { from { filter: drop-shadow(0 0 12px rgba(34,197,94,.5)); } to { filter: drop-shadow(0 0 24px rgba(34,197,94,.5)) drop-shadow(0 0 8px rgba(255,255,255,.3)); } }\n  @media (prefers-reduced-motion: reduce) { .hot { transition: none; } #door.open { animation: none; filter: drop-shadow(0 0 18px rgba(34,197,94,.5)); } }\n\n  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 99; animation: fall linear forwards; }\n  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); } }\n  .shake { animation: shake .4s ease; }\n  @keyframes shake { 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }\n  @media (prefers-reduced-motion: reduce){ .confetti{ display:none !important; } .shake{ animation:none !important; } }\n  #mOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.72); z-index: 20; align-items: center; justify-content: center; padding: 16px; }\n  #mCard { width: 100%; max-width: 460px; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 22px; color: #fff; font-family: system-ui, sans-serif; box-shadow: 0 18px 50px rgba(0,0,0,.5); }\n  #mCard .mtitle { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #c4b5fd; font-weight: 700; }\n  #mCard .mq { font-size: 18px; line-height: 1.45; margin: 8px 0 16px; }\n  #mCard input[type=text] { width: 100%; font: inherit; font-size: 17px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,.25); background: rgba(0,0,0,.3); color: #fff; text-align: center; box-sizing: border-box; }\n  #mCard input:focus { outline: 2px solid var(--accent); border-color: transparent; }\n  #mCard button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 11px 16px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; margin-top: 10px; box-sizing: border-box; }\n  #mCard button.opt { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); font-weight: 600; text-align: left; }\n  #mCard button.opt:hover { background: rgba(255,255,255,.2); }\n  #mCard .mfb { min-height: 20px; text-align: center; font-weight: 700; margin-top: 10px; }\n  #mCard .mfb.bad { color: #fda4af; } #mCard .mfb.good { color: #86efac; }\n  #mCard .mhint { background: none !important; color: rgba(255,255,255,.55) !important; font-weight: 600 !important; font-size: 13px; width: auto !important; display: block; margin: 10px auto 0; }\n  #mCard .mhinttext { background: rgba(255,255,255,.1); border-radius: 9px; padding: 9px 11px; font-size: 14px; margin-top: 8px; display: none; white-space: pre-line; }\n  #mCard .mclose { background: none !important; color: rgba(255,255,255,.4) !important; font-size: 12px; width: auto !important; margin: 6px auto 0; display: block; }\n  #fOverlay { display: none; position: fixed; inset: 0; background: rgba(8,4,20,.88); z-index: 30; align-items: center; justify-content: center; padding: 16px; }\n  #fOverlay .fcard { width: 100%; max-width: 480px; text-align: center; background: #221440; border: 1px solid rgba(255,255,255,.18); border-radius: 18px; padding: 28px; color: #fff; font-family: system-ui, sans-serif; }\n  #fOverlay h1 { margin: 0 0 8px; font-size: 26px; }\n  #fOverlay .fstars { font-size: 26px; letter-spacing: 4px; color: #fbbf24; margin: 6px 0; }\n  #fOverlay .fword { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 16px 0; }\n  #fOverlay .fword span { width: 44px; height: 52px; border-radius: 10px; background: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; animation: flipin .6s ease backwards; }\n  @keyframes flipin { from { transform: rotateX(90deg); } to { transform: rotateX(0); } }\n  @media (prefers-reduced-motion: reduce){ #fOverlay .fword span{ animation:none !important; } }\n  #fOverlay p { color: rgba(255,255,255,.8); line-height: 1.5; }\n  #fOverlay button { font: inherit; cursor: pointer; border: none; border-radius: 10px; padding: 12px 18px; font-weight: 700; background: var(--accent); color: #fff; width: 100%; }\n\u003c/style>\n\u003c/head>\n\u003cbody>\n\u003ch1>\u003c/h1>\n\u003cdiv id=\"hud\">\u003cspan id=\"hudStep\">\u003c/span>\u003cspan id=\"hudStars\">\u003c/span>\u003cdiv id=\"hudLetters\">\u003c/div>\u003c/div>\n\u003cdiv class=\"note\" id=\"note\">Cerceteaza camera: da click pe obiecte si rezolva-le ca sa deschizi usa.\u003c/div>\n\u003cdiv id=\"stage\">\u003csvg id=\"scene\" viewBox=\"0 0 800 500\" xmlns=\"http://www.w3.org/2000/svg\">\u003c/svg>\u003c/div>\n\u003cdiv id=\"mOverlay\">\u003cdiv id=\"mCard\">\n  \u003cdiv class=\"mtitle\" id=\"mTitle\">\u003c/div>\n  \u003cdiv class=\"mq\" id=\"mQ\">\u003c/div>\n  \u003cdiv id=\"mAnswers\">\u003c/div>\n  \u003cdiv class=\"mfb\" id=\"mFeedback\">\u003c/div>\n  \u003cbutton class=\"mhint\" id=\"mHintBtn\">Vreau un indiciu\u003c/button>\n  \u003cdiv class=\"mhinttext\" id=\"mHintText\">\u003c/div>\n  \u003cbutton class=\"mclose\" id=\"mClose\">Pleaca de aici\u003c/button>\n\u003c/div>\u003c/div>\n\u003cdiv id=\"fOverlay\">\u003cdiv class=\"fcard\">\n  \u003ch1>Evadare reusita!\u003c/h1>\n  \u003cdiv class=\"fstars\" id=\"fStars\">\u003c/div>\n  \u003cdiv class=\"fword\" id=\"fWord\">\u003c/div>\n  \u003cp id=\"fMsg\">\u003c/p>\n  \u003cbutton id=\"fAgain\">Joaca din nou\u003c/button>\n\u003c/div>\u003c/div>\n\u003cscript>\nvar CFG = __CFG__;\ndocument.documentElement.style.setProperty('--accent', CFG.color || '#6d28d9');\nvar totalStars = 0;\nfunction el(id){ return document.getElementById(id); }\nfunction norm(s){ return String(s).trim().toLowerCase().normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').replace(/,/g, '.'); }\nfunction starsFor(att, hint){ return (hint || att >= 2) ? 1 : (att === 1 ? 2 : 3); }\nfunction finalWord(){ var w = ''; for (var i = 0; i \u003c CFG.puzzles.length; i++){ var L = (CFG.puzzles[i].letter || '').trim(); if (L) w += L.toUpperCase(); } return w; }\nfunction choiceOpts(p){ return (p.choices || '').split('\\n').map(function(l){ return l.trim(); }).filter(Boolean).map(function(o){ return o.charAt(0) === '*' ? o.slice(1).trim() : o; }); }\nfunction choiceCorrect(p){ var ls = (p.choices || '').split('\\n'); for (var i = 0; i \u003c ls.length; i++){ var l = ls[i].trim(); if (l.charAt(0) === '*') return l.slice(1).trim(); } return ''; }\nvar _lastGiven = '';\nfunction checkAnswer(p, given){ var exp = p.type === 'tf' ? p.tfAnswer : (p.type === 'choice' ? choiceCorrect(p) : p.answer); var ok = norm(given) !== '' && norm(given) === norm(exp); if(ok){ _lastGiven = given; } return ok; }\nfunction beep(ok){ if(CFG._campaign){ try{ parent.beep(ok); }catch(e){} return; } try { var ctx = beep.ctx || (beep.ctx = new (window.AudioContext || window.webkitAudioContext)()); var t = ctx.currentTime; var fs = ok ? [523, 784] : [196]; fs.forEach(function(f, k){ var o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = f; o.type = 'triangle'; g.gain.setValueAtTime(0.12, t + k * 0.09); g.gain.exponentialRampToValueAtTime(0.001, t + k * 0.09 + 0.25); o.connect(g); g.connect(ctx.destination); o.start(t + k * 0.09); o.stop(t + k * 0.09 + 0.3); }); } catch (e) {} }\nfunction confetti(){ var colors = [CFG.color || '#6d28d9', '#fbbf24', '#34d399', '#60a5fa', '#f472b6']; for (var i = 0; i \u003c 90; i++){ var c = document.createElement('div'); c.className = 'confetti'; c.style.left = (i * 137 % 100) + 'vw'; c.style.background = colors[i % colors.length]; c.style.animationDuration = (2.2 + (i * 53 % 18) / 10) + 's'; c.style.animationDelay = ((i * 31 % 14) / 10) + 's'; document.body.appendChild(c); } }\nfunction roomReady(){ if(CFG._campaign){ try{ parent.roomReady(CFG._campaign.idx); }catch(e){} } }\n/* Contract de finalizare a camerei — un singur loc pentru payload-ul parent.nextRoom\n   (înlocuiește duplicatele din showFinal/finale; D7). Citește totalStars + finalWord() la apel. */\nfunction campaignDone(){ if(CFG._campaign){ try{ var p = CFG.puzzles[0]; var bkey = '*'; if(p.type === 'tf'){ bkey = _lastGiven || 'Adevarat'; } else if(p.type === 'choice'){ var opts = choiceOpts(p); var bi = opts.findIndex(function(o){ return norm(o) === norm(_lastGiven); }); bkey = String(bi >= 0 ? bi : 0); } parent.nextRoom({idx:CFG._campaign.idx, stars:totalStars, letter:finalWord().charAt(0), branch:bkey}); }catch(e){} } }\nwindow.onerror = function(msg){ if(CFG._campaign){ try{ parent.roomError(CFG._campaign.idx, String(msg)); }catch(e){} } };\nif(CFG._campaign){\n  /* Mod cameră (§Design pct.12): ascunde h1, progres propriu, restart propriu */\n  var _cs = document.createElement('style');\n  _cs.textContent = 'h1{display:none!important}.progress{display:none!important}.meta{display:none!important}';\n  (document.head || document.documentElement).appendChild(_cs);\n}\nvar N = CFG.puzzles.length, solvedFlags = [], solvedCount = 0;\n\nvar POOL = [\n  { name: 'Ceasul', x: 308, y: 62, svg: '\u003ccircle cx=\"32\" cy=\"32\" r=\"30\" fill=\"#caa856\"/>\u003ccircle cx=\"32\" cy=\"32\" r=\"24\" fill=\"#f4ecd8\"/>\u003cline x1=\"32\" y1=\"32\" x2=\"32\" y2=\"16\" stroke=\"#222\" stroke-width=\"3\"/>\u003cline x1=\"32\" y1=\"32\" x2=\"43\" y2=\"36\" stroke=\"#222\" stroke-width=\"3\"/>\u003ccircle cx=\"32\" cy=\"32\" r=\"2.5\" fill=\"#222\"/>' },\n  { name: 'Tabloul', x: 108, y: 84, svg: '\u003crect width=\"84\" height=\"64\" fill=\"#8a5a2b\"/>\u003crect x=\"6\" y=\"6\" width=\"72\" height=\"52\" fill=\"#b7d3e8\"/>\u003cpolygon points=\"10,52 34,24 50,44 60,32 74,52\" fill=\"#4f7a4f\"/>\u003ccircle cx=\"62\" cy=\"16\" r=\"6\" fill=\"#f7d774\"/>' },\n  { name: 'Sertarul biroului', x: 64, y: 300, svg: '\u003crect width=\"150\" height=\"14\" fill=\"#7a4a22\"/>\u003crect x=\"6\" y=\"14\" width=\"138\" height=\"46\" fill=\"#925a2c\"/>\u003crect x=\"20\" y=\"22\" width=\"110\" height=\"28\" fill=\"#7a4a22\"/>\u003ccircle cx=\"75\" cy=\"36\" r=\"4\" fill=\"#f3cf6d\"/>\u003crect x=\"10\" y=\"60\" width=\"10\" height=\"34\" fill=\"#7a4a22\"/>\u003crect x=\"130\" y=\"60\" width=\"10\" height=\"34\" fill=\"#7a4a22\"/>' },\n  { name: 'Dulapul', x: 232, y: 228, svg: '\u003crect width=\"92\" height=\"142\" fill=\"#8a5a2b\"/>\u003crect x=\"5\" y=\"5\" width=\"38\" height=\"132\" fill=\"#a06a35\"/>\u003crect x=\"49\" y=\"5\" width=\"38\" height=\"132\" fill=\"#a06a35\"/>\u003ccircle cx=\"38\" cy=\"72\" r=\"3.5\" fill=\"#f3cf6d\"/>\u003ccircle cx=\"54\" cy=\"72\" r=\"3.5\" fill=\"#f3cf6d\"/>' },\n  { name: 'Fereastra', x: 424, y: 62, svg: '\u003crect width=\"96\" height=\"120\" fill=\"#6b7f9e\"/>\u003crect x=\"6\" y=\"6\" width=\"84\" height=\"108\" fill=\"#101d3a\"/>\u003cline x1=\"48\" y1=\"6\" x2=\"48\" y2=\"114\" stroke=\"#6b7f9e\" stroke-width=\"5\"/>\u003cline x1=\"6\" y1=\"60\" x2=\"90\" y2=\"60\" stroke=\"#6b7f9e\" stroke-width=\"5\"/>\u003ccircle cx=\"68\" cy=\"32\" r=\"11\" fill=\"#f4f1de\"/>' },\n  { name: 'Raftul cu carti', x: 558, y: 78, svg: '\u003crect y=\"34\" width=\"120\" height=\"8\" fill=\"#7a4a22\"/>\u003crect x=\"6\" y=\"6\" width=\"13\" height=\"28\" fill=\"#b54a4a\"/>\u003crect x=\"21\" y=\"2\" width=\"13\" height=\"32\" fill=\"#4a7ab5\"/>\u003crect x=\"36\" y=\"8\" width=\"13\" height=\"26\" fill=\"#54a05e\"/>\u003crect x=\"51\" y=\"4\" width=\"13\" height=\"30\" fill=\"#c2a23e\"/>\u003crect x=\"66\" y=\"9\" width=\"13\" height=\"25\" fill=\"#9a5ab5\"/>\u003crect x=\"81\" y=\"5\" width=\"13\" height=\"29\" fill=\"#b5764a\"/>\u003crect x=\"96\" y=\"8\" width=\"13\" height=\"26\" fill=\"#5aa0b5\"/>' },\n  { name: 'Cutia', x: 404, y: 330, svg: '\u003crect width=\"66\" height=\"50\" fill=\"#925a2c\"/>\u003cline x1=\"0\" y1=\"0\" x2=\"66\" y2=\"50\" stroke=\"#7a4a22\" stroke-width=\"5\"/>\u003cline x1=\"66\" y1=\"0\" x2=\"0\" y2=\"50\" stroke=\"#7a4a22\" stroke-width=\"5\"/>\u003crect width=\"66\" height=\"50\" fill=\"none\" stroke=\"#7a4a22\" stroke-width=\"6\"/>' },\n  { name: 'Lampa', x: 516, y: 252, svg: '\u003cpolygon points=\"14,0 50,0 60,34 4,34\" fill=\"#d9a23e\"/>\u003crect x=\"29\" y=\"34\" width=\"6\" height=\"78\" fill=\"#555\"/>\u003crect x=\"12\" y=\"112\" width=\"40\" height=\"8\" rx=\"3\" fill=\"#555\"/>\u003ccircle cx=\"32\" cy=\"17\" r=\"9\" fill=\"#ffe9a8\" opacity=\".8\"/>' },\n  { name: 'Seiful', x: 596, y: 300, svg: '\u003crect width=\"74\" height=\"74\" rx=\"6\" fill=\"#5b6470\"/>\u003crect x=\"7\" y=\"7\" width=\"60\" height=\"60\" rx=\"4\" fill=\"#434b55\"/>\u003ccircle cx=\"37\" cy=\"37\" r=\"14\" fill=\"#5b6470\"/>\u003ccircle cx=\"37\" cy=\"37\" r=\"9\" fill=\"#2c3138\"/>\u003cline x1=\"37\" y1=\"28\" x2=\"37\" y2=\"37\" stroke=\"#d4d4d4\" stroke-width=\"2.5\"/>' },\n  { name: 'Covorul', x: 250, y: 432, svg: '\u003cellipse cx=\"110\" cy=\"26\" rx=\"110\" ry=\"26\" fill=\"#7a3b56\"/>\u003cellipse cx=\"110\" cy=\"26\" rx=\"80\" ry=\"17\" fill=\"#94506c\"/>\u003cellipse cx=\"110\" cy=\"26\" rx=\"46\" ry=\"9\" fill=\"#7a3b56\"/>' }\n];\nfunction crate(i){ return { name: 'Lada ' + (i + 1), x: 50 + ((i - 10) % 8) * 86, y: 408, svg: POOL[6].svg }; }\n\nvar base = '\u003crect width=\"800\" height=\"380\" fill=\"#3b2a63\"/>\u003crect y=\"380\" width=\"800\" height=\"120\" fill=\"#241a3f\"/>\u003crect y=\"372\" width=\"800\" height=\"8\" fill=\"#1c1336\"/>'\n  + '\u003cg id=\"door\">\u003crect x=\"694\" y=\"148\" width=\"86\" height=\"232\" fill=\"#6b4226\"/>\u003crect x=\"702\" y=\"156\" width=\"70\" height=\"216\" fill=\"#8a5a2b\"/>\u003ccircle cx=\"712\" cy=\"266\" r=\"5\" fill=\"#f3cf6d\"/>\u003cg id=\"lock\">\u003crect x=\"730\" y=\"250\" width=\"26\" height=\"22\" rx=\"4\" fill=\"#caa856\"/>\u003cpath d=\"M735 250 v-7 a8 8 0 0 1 16 0 v7\" fill=\"none\" stroke=\"#caa856\" stroke-width=\"4\"/>\u003c/g>\u003c/g>';\nvar objs = '';\nfor (var i = 0; i \u003c N; i++) {\n  var o = POOL[i] || crate(i);\n  objs += '\u003cg class=\"hot\" data-i=\"' + i + '\" transform=\"translate(' + o.x + ',' + o.y + ')\">' + o.svg + '\u003ctitle>' + o.name + '\u003c/title>\u003c/g>';\n}\nel('scene').innerHTML = base + objs;\n\nel('scene').addEventListener('click', function(e){\n  var t = e.target;\n  var g = t.closest ? t.closest('g.hot') : null;\n  if (g) {\n    if (!g.classList.contains('done')) openPuzzle(+g.getAttribute('data-i'), onSolved);\n    return;\n  }\n  var door = t.closest ? t.closest('#door') : null;\n  if (door) {\n    if (solvedCount >= N) { showFinal(); }\n    else { beep(false); el('note').textContent = 'Usa e incuiata! Mai ai ' + (N - solvedCount) + ' obiecte de cercetat.'; }\n  }\n});\n\nfunction onSolved(i){\n  solvedFlags[i] = true; solvedCount++;\n  var g = document.querySelector('g.hot[data-i=\"' + i + '\"]');\n  g.classList.add('done');\n  var L = (CFG.puzzles[i].letter || '').trim();\n  g.innerHTML += '\u003ccircle cx=\"0\" cy=\"0\" r=\"13\" fill=\"#16a34a\"/>\u003ctext x=\"0\" y=\"5\" text-anchor=\"middle\" font-size=\"14\" font-weight=\"700\" fill=\"#fff\">' + (L ? L.toUpperCase() : '\\u2713') + '\u003c/text>';\n  updateHud();\n  if (solvedCount >= N) {\n    el('door').classList.add('open');\n    el('note').textContent = 'Toate obiectele rezolvate! Da click pe usa ca sa evadezi.';\n    beep(true);\n  }\n}\n\nfunction updateHud(){\n  el('hudStep').textContent = 'Obiecte: ' + solvedCount + '/' + N;\n  hudLetters(function(j){ return solvedFlags[j]; });\n}\nfunction hudLetters(isSolved){\n  el('hudStars').textContent = totalStars + ' \\u2605';\n  var hb = el('hudLetters'); hb.innerHTML = '';\n  for (var j = 0; j \u003c CFG.puzzles.length; j++){\n    var L = (CFG.puzzles[j].letter || '').trim(); if (!L) continue;\n    var s = document.createElement('span');\n    if (isSolved(j)){ s.textContent = L.toUpperCase(); s.className = 'won'; } else s.textContent = '?';\n    hb.appendChild(s);\n  }\n}\nvar mIdx = -1, mAtt = 0, mHint = false, mCb = null;\nel('mHintBtn').onclick = function(){ mHint = true; el('mHintText').style.display = 'block'; };\nel('mClose').onclick = function(){ el('mOverlay').style.display = 'none'; };\nfunction modalOpen(){ return el('mOverlay').style.display === 'flex'; }\nfunction openPuzzle(i, cb){\n  mIdx = i; mAtt = 0; mHint = false; mCb = cb;\n  var p = CFG.puzzles[i];\n  el('mTitle').textContent = p.title || ('Puzzle ' + (i + 1));\n  el('mQ').textContent = p.question;\n  el('mFeedback').textContent = ''; el('mFeedback').className = 'mfb';\n  el('mHintText').style.display = 'none'; el('mHintText').textContent = p.hint || '';\n  el('mHintBtn').style.display = p.hint ? '' : 'none';\n  var box = el('mAnswers'); box.innerHTML = '';\n  if (p.type === 'free') {\n    var inp = document.createElement('input'); inp.type = 'text'; inp.placeholder = 'Scrie raspunsul...'; inp.autocomplete = 'off';\n    var b = document.createElement('button'); b.textContent = 'Verifica';\n    b.onclick = function(){ mCheck(inp.value); };\n    inp.onkeydown = function(e){ e.stopPropagation(); if (e.key === 'Enter') b.click(); };\n    box.appendChild(inp); box.appendChild(b);\n    setTimeout(function(){ inp.focus(); }, 60);\n  } else if (p.type === 'tf') {\n    ['Adevarat', 'Fals'].forEach(function(v){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = v; b.onclick = function(){ mCheck(v); }; box.appendChild(b); });\n  } else {\n    choiceOpts(p).forEach(function(o){ var b = document.createElement('button'); b.className = 'opt'; b.textContent = o; b.onclick = function(){ mCheck(o); }; box.appendChild(b); });\n  }\n  el('mOverlay').style.display = 'flex';\n}\nfunction mCheck(given){\n  var p = CFG.puzzles[mIdx];\n  if (checkAnswer(p, given)) {\n    var s = starsFor(mAtt, mHint);\n    totalStars += s; beep(true);\n    el('mFeedback').textContent = 'Corect! +' + s + ' \\u2605'; el('mFeedback').className = 'mfb good';\n    setTimeout(function(){ el('mOverlay').style.display = 'none'; var cb = mCb; mCb = null; if (cb) cb(mIdx, s); }, 750);\n  } else {\n    mAtt++; beep(false);\n    el('mFeedback').textContent = 'Nu e bine, mai incearca!'; el('mFeedback').className = 'mfb bad';\n    var c = el('mCard'); c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');\n  }\n}\nfunction showFinal(){\n  if(CFG._campaign){ campaignDone(); return; }\n  el('fStars').textContent = totalStars + ' / ' + (CFG.puzzles.length * 3) + ' \\u2605';\n  var w = finalWord(); var bw = el('fWord'); bw.innerHTML = '';\n  for (var j = 0; j \u003c w.length; j++){ var s = document.createElement('span'); s.textContent = w.charAt(j); s.style.animationDelay = (j * 0.18) + 's'; bw.appendChild(s); }\n  var msg = CFG.finalMessage || '';\n  el('fMsg').textContent = CFG.player ? CFG.player + ', ' + msg.charAt(0).toLowerCase() + msg.slice(1) : msg;\n  el('fOverlay').style.display = 'flex';\n  beep(true); confetti();\n}\nel('fAgain').onclick = function(){ location.reload(); };\nupdateHud();\nroomReady();\n\u003c/script>\n\u003c/body>\n\u003c/html>"};
+(async function(){
+  var h=location.hash.slice(1);
+  if(!h){document.getElementById('intro-title').textContent='Niciun joc în acest link.';return;}
+  window.MASTER=JSON.parse(await inflateFromBase64url(h));
+  var s=document.createElement('script');s.textContent=document.getElementById('run').textContent;document.body.appendChild(s);
+})();
+</script>
+<script type="text/plain" id="run">
+var MASTER=window.MASTER;
+/*
+ * ASCII DIAGRAM — contractul parent.*:
+ * ┌──────────── orchestrator (window) ─────────────────────────┐
+ * │  nextRoom({idx,stars,letter})   ← camera.parent.nextRoom   │
+ * │  roomReady(idx)                 ← camera.parent.roomReady  │
+ * │  roomError(idx,msg)             ← camera.parent.roomError  │
+ * │  beep(ok)                       ← camera.parent.beep       │
+ * └────────────────────────────────────────────────────────────┘
+ * Idempotență: nextRoom/roomError acceptate doar de la activeWindow.
+ * roomDone[idx]=true după primul nextRoom → duplicatele ignorate.
+ * Timeout 4s → skipRoom → aceeași compoziție de coridor (D5).
+ */
+var ROTATION = ['classic','terminal','arcade','chat','point'];
+var TOKEN    = '__CFG__';
+
+document.documentElement.style.setProperty('--accent', MASTER.color || '#6d28d9');
+
+var N          = MASTER.puzzles.length;
+var totalStars = 0;
+var collected  = [];
+var roomStars  = []; /* stele per cameră — pentru diplomă (§Design pct.9) */
+var skipped    = {};
+
+var activeIdx    = -1;
+var activeWindow = null;
+var readyTimer   = null;
+var roomDone     = {};
+var ADVENTURE    = !!MASTER.adventure;
+var owUnlocked   = {0: true}; /* ușile deblocate în adventure mode */
+var owExitUnlocked = false;
+
+/* ----- Resume — safeStore (D3) + djb2 hash (D11) ----- */
+function djb2(s){
+  var h = 5381;
+  for(var i=0;i<s.length;i++) h = ((h<<5)+h) ^ s.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+var _RESUME_KEY = 'esc-camp-' + djb2(JSON.stringify(MASTER));
+function safeGet(){ try{ return JSON.parse(sessionStorage.getItem(_RESUME_KEY)); }catch(e){ return null; } }
+function safeSet(v){ try{ sessionStorage.setItem(_RESUME_KEY, JSON.stringify(v)); }catch(e){ /* webview restrictat — continuă fără resume */ } }
+function saveProgress(){
+  var payload = { idx: activeIdx, totalStars: totalStars, collected: collected.slice(), roomStars: roomStars.slice(), skipped: skipped };
+  if(ADVENTURE){
+    payload.doneList = Object.keys(roomDone).map(Number);
+    payload.owUnlocked = owUnlocked;
+    payload.owExitUnlocked = owExitUnlocked;
+    payload.target = owTargetIdx;
+  }
+  safeSet(payload);
+}
+function clearProgress(){ try{ sessionStorage.removeItem(_RESUME_KEY); sessionStorage.removeItem(_DEADLINE_KEY); }catch(e){} }
+
+/* ----- Timer Calm (§Design pct.10) — ceas M:SS în chrome.
+   Pornește la „Începe aventura"; deadline ABSOLUT în sessionStorage → resume-ul
+   (reload mid-campanie) NU resetează ceasul. Sub 1 min → auriu. La expirare îngheață
+   pe 0:00 + marcaj discret, jocul curge nestingherit (zero penalizare). ----- */
+var TIMER_SEC    = (+MASTER.timerMin || 0) * 60;
+var _DEADLINE_KEY = _RESUME_KEY + '-dl';
+var timerEl      = document.getElementById('chrome-timer');
+var _deadline    = 0, _timerInt = null, _timerExpired = false;
+function _fmt(s){ var m = Math.floor(s/60), ss = s % 60; return m + ':' + (ss < 10 ? '0' : '') + ss; }
+function tickTimer(){
+  if(!_deadline){ return; }
+  var rem = Math.round((_deadline - Date.now()) / 1000);
+  if(rem <= 0){
+    rem = 0;
+    if(!_timerExpired){ _timerExpired = true; timerEl.classList.add('expired'); timerEl.title = 'Timpul a expirat — jocul continua'; }
+    if(_timerInt){ clearInterval(_timerInt); _timerInt = null; }
+  }
+  timerEl.textContent = _fmt(rem);
+  if(rem <= 60) timerEl.classList.add('low');
+}
+function stopTimer(){ if(_timerInt){ clearInterval(_timerInt); _timerInt = null; } }
+function startTimer(){
+  if(TIMER_SEC <= 0) return;
+  timerEl.hidden = false;
+  var existing = 0; try{ existing = +sessionStorage.getItem(_DEADLINE_KEY) || 0; }catch(e){}
+  if(existing > 0){ _deadline = existing; } /* resume → păstrează ceasul */
+  else { _deadline = Date.now() + TIMER_SEC * 1000; try{ sessionStorage.setItem(_DEADLINE_KEY, String(_deadline)); }catch(e){} }
+  tickTimer();
+  if(!_timerInt && !_timerExpired) _timerInt = setInterval(tickTimer, 1000);
+}
+
+/* ----- Muzică ambient (T10) — opt-in MASTER.music. Orchestrator-only: părintele
+   deține AudioContext (reutilizează beep._ctx, deblocat de gestul global); camerele
+   nu știu de muzică. Arpegiu calm pe pentatonică minoră; tempo ACCELEREAZĂ sub 1 min
+   (legat de Timer Calm). Se atenuează (duck) cât timp vocea vorbește. Fallback:
+   fără AudioContext → no-op, butonul rămâne ascuns (zero penalizare). ----- */
+var MUSIC    = !!MASTER.music;
+var musicOn  = MUSIC;
+var _mGain = null, _mTimer = null, _mStep = 0, _mDuck = 1;
+var _MSCALE = [0, 3, 5, 7, 10]; /* pentatonică minoră (semitonuri) */
+function _mFreq(semi){ return 220 * Math.pow(2, semi / 12); }
+function musicTempoFactor(){
+  /* 1.0 normal → ~1.8 pe ultimul minut (accelerare progresivă) */
+  if(TIMER_SEC <= 0 || !_deadline) return 1;
+  var rem = (_deadline - Date.now()) / 1000;
+  if(rem < 0) return 1.8;
+  if(rem > 60) return 1;
+  return 1 + (1 - rem / 60) * 0.8;
+}
+function _mTick(){
+  if(!musicOn || !_mGain){ _mTimer = null; return; }
+  var ctx = beep._ctx;
+  if(ctx){
+    try{
+      var oct = (Math.floor(_mStep / _MSCALE.length) % 2) ? 12 : 0;
+      var semi = _MSCALE[_mStep % _MSCALE.length] + oct;
+      var o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime;
+      o.type = 'sine'; o.frequency.value = _mFreq(semi);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05 * _mDuck, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+      o.connect(g); g.connect(_mGain);
+      o.start(t); o.stop(t + 0.6);
+    }catch(e){}
+  }
+  _mStep++;
+  _mTimer = setTimeout(_mTick, 520 / musicTempoFactor()); /* mai rapid când tempo crește */
+}
+function startMusic(){
+  if(!musicOn) return;
+  try{
+    var ctx = beep._ctx || (beep._ctx = new (window.AudioContext || window.webkitAudioContext)());
+    if(ctx.state === 'suspended') ctx.resume();
+    if(!_mGain){ _mGain = ctx.createGain(); _mGain.gain.value = 1; _mGain.connect(ctx.destination); }
+    if(!_mTimer){ _mStep = 0; _mTick(); }
+  }catch(e){}
+}
+function stopMusic(){ if(_mTimer){ clearTimeout(_mTimer); _mTimer = null; } }
+function duckMusic(on){ _mDuck = on ? 0.22 : 1; } /* vocea are prioritate (edge T10) */
+window.__music = { tempo: musicTempoFactor, state: function(){ return { on: musicOn, playing: !!_mTimer, duck: _mDuck }; } };
+
+var frameEl     = document.getElementById('room-frame');
+var introEl     = document.getElementById('intro');
+var skipEl      = document.getElementById('skip-banner');
+var finaleEl    = document.getElementById('finale');
+var diplomaEl   = document.getElementById('diploma');
+
+/* ----- Dots ----- */
+function buildDots(){
+  var d = document.getElementById('dots'); d.innerHTML = '';
+  for(var i=0;i<N;i++){
+    var s = document.createElement('span');
+    s.id = 'dot-'+i;
+    s.setAttribute('role','img');
+    d.appendChild(s);
+    setDot(i,''); /* setează aria-label inițial (neînceput) */
+  }
+}
+function setDot(i,cls){
+  var d=document.getElementById('dot-'+i); if(!d) return;
+  d.className=cls;
+  var st = cls==='done' ? 'rezolvata' : (cls==='active' ? 'in curs' : 'neinceputa');
+  d.setAttribute('aria-label','Camera '+(i+1)+' din '+N+': '+st);
+}
+
+/* ----- Ușa coridorului (§Design pct.7) ----- */
+function doorHtml(style, isLast, isStuck){
+  var cls = (isLast ? ' crescendo' : '') + (isStuck ? ' stuck' : '');
+  var lock = isStuck ? '<span class="door-lock">&#128274;</span>' : '';
+  if(style === 'classic') return '<div class="door-classic'+cls+'"><span class="dq">?</span>'+lock+'</div>';
+  if(style === 'terminal') return '<div class="door-terminal'+cls+'"><span class="dt-txt">'+(isStuck?'BLOCKED':'ACCESS')+'</span>'+(isStuck?'':' <span class="dt-cur">_</span>')+lock+'</div>';
+  if(style === 'arcade') return '<div class="door-arcade'+cls+'"><span class="da-sprite">&#9654;</span>'+lock+'</div>';
+  if(style === 'chat') return '<div class="door-chat'+cls+'"><div class="dc-notch"></div><div class="dc-screen"><div class="dc-bub dc-npc">Salut!</div><div class="dc-bub dc-me">?</div></div><div class="dc-home"></div>'+lock+'</div>';
+  if(style === 'point') return '<div class="door-point'+cls+'"><svg viewBox="0 0 88 124" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="84" height="120" rx="6" fill="#5a3518"/><rect x="6" y="6" width="76" height="112" rx="4" fill="#7c4f2c"/><rect x="10" y="10" width="30" height="44" rx="3" fill="rgba(0,0,0,.22)"/><rect x="48" y="10" width="30" height="44" rx="3" fill="rgba(0,0,0,.22)"/><rect x="10" y="62" width="68" height="52" rx="3" fill="rgba(0,0,0,.15)"/><circle cx="67" cy="70" r="8" fill="#c8952a"/><circle cx="67" cy="70" r="5" fill="#f3cf6d"/><circle cx="67" cy="70" r="2" fill="#a07022"/><circle cx="32" cy="87" r="13" fill="none" stroke="#f3cf6d" stroke-width="3"/><line x1="42" y1="97" x2="50" y2="105" stroke="#f3cf6d" stroke-width="3.5" stroke-linecap="round"/></svg>'+lock+'</div>';
+  return doorHtml('point', isLast, isStuck); /* fallback */
+}
+
+/* ----- Beep — singurul AudioContext (D2) ----- */
+function beep(ok){
+  try{
+    var ctx=beep._ctx||(beep._ctx=new(window.AudioContext||window.webkitAudioContext)());
+    if(ctx.state==='suspended') ctx.resume(); /* safety: ctx poate fi suspendat din nou */
+    var t=ctx.currentTime; var fs=ok?[523,784]:[196];
+    fs.forEach(function(f,k){
+      var o=ctx.createOscillator(),g=ctx.createGain();
+      o.frequency.value=f; o.type='triangle';
+      g.gain.setValueAtTime(0.12,t+k*0.09);
+      g.gain.exponentialRampToValueAtTime(0.001,t+k*0.09+0.25);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t+k*0.09); o.stop(t+k*0.09+0.3);
+    });
+  }catch(e){}
+}
+
+/* ----- Deblocare audio (D2) — primul gest pe părinte creează+deblochează ctx-ul.
+   Necesar pe TOATE căile, nu doar btn-start: la resume (reload mid-campanie) se intră
+   direct pe hartă fără btn-start, iar camerele cheamă parent.beep() din iframe (gestul
+   din iframe NU deblochează ctx-ul părintelui). Pe iOS Safari resume() singur nu ajunge
+   → redăm și un buffer silențios în gest. Listener one-time, se auto-elimină. */
+function unlockAudio(){
+  try{
+    var c=beep._ctx||(beep._ctx=new(window.AudioContext||window.webkitAudioContext)());
+    if(c.state==='suspended') c.resume();
+    var b=c.createBuffer(1,1,22050),s=c.createBufferSource();
+    s.buffer=b; s.connect(c.destination); s.start(0);
+  }catch(e){}
+}
+var _audioUnlocked=false;
+function _onFirstGesture(){
+  if(_audioUnlocked) return; _audioUnlocked=true; unlockAudio();
+  document.removeEventListener('pointerdown',_onFirstGesture,true);
+  document.removeEventListener('keydown',_onFirstGesture,true);
+}
+document.addEventListener('pointerdown',_onFirstGesture,true);
+document.addEventListener('keydown',_onFirstGesture,true);
+
+/* ----- Narațiune vocală (D10) — opt-in via MASTER.voice, buton în bara chrome.
+   Edge cases tratate: (1) getVoices() poate fi gol sincron → re-citim la voiceschanged;
+   (2) fără voce ro-* → vocea default a sistemului (nu setăm u.voice); (3) la fiecare
+   schimbare de scenă (hideAll) → speechSynthesis.cancel() (fără replici fantomă);
+   (4) fără API → butonul rămâne ascuns, totul devine no-op. */
+var SPEECH   = ('speechSynthesis' in window) && !!MASTER.voice;
+var voiceOn  = SPEECH; /* pornit implicit când feature-ul e activat din builder */
+var _roVoice = null, _voicesReady = false;
+function _pickVoice(){
+  try{
+    var vs = window.speechSynthesis.getVoices();
+    if(!vs || !vs.length) return; /* gol sincron — așteptăm voiceschanged */
+    _voicesReady = true;
+    _roVoice = vs.filter(function(v){ return /(^|[^a-z])ro([-_]|$)/i.test(v.lang||''); })[0] || null;
+  }catch(e){}
+}
+if(SPEECH){
+  _pickVoice();
+  try{ window.speechSynthesis.onvoiceschanged = _pickVoice; }catch(e){}
+}
+function voiceCancel(){ if(SPEECH){ try{ window.speechSynthesis.cancel(); }catch(e){} } duckMusic(false); }
+function voiceSay(text){
+  if(!SPEECH || !voiceOn || !text) return;
+  try{
+    window.speechSynthesis.cancel();
+    if(!_voicesReady) _pickVoice();
+    var u = new SpeechSynthesisUtterance(String(text));
+    if(_roVoice){ u.voice = _roVoice; u.lang = _roVoice.lang; } else { u.lang = 'ro-RO'; }
+    u.rate = 1; u.pitch = 1;
+    /* vocea are prioritate → atenuează muzica cât timp vorbește (edge T10) */
+    u.onstart = function(){ duckMusic(true); };
+    u.onend   = function(){ duckMusic(false); };
+    u.onerror = function(){ duckMusic(false); };
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+window.voiceSay = voiceSay; /* expus camerelor: parent.voiceSay(replica) — guard în motoare */
+
+/* ----- parent.* API ----- */
+
+/* Calculează camera țintă după răspuns (adventure mode).
+   Returnează număr (idx cameră) sau 'end'. Non-adventure → idx+1. */
+function resolveBranch(idx, key){
+  if(!ADVENTURE) return idx + 1;
+  var p = MASTER.puzzles[idx];
+  var br = p && p.branch;
+  var t = br ? (br[key] !== undefined ? br[key] : br['*']) : undefined;
+  if(t === undefined || t === '') t = idx + 1; /* fallback liniar */
+  if(t === 'end') return 'end';
+  t = +t;
+  if(isNaN(t) || t < 0 || t >= N) return 'end';
+  return t;
+}
+
+window.nextRoom = function(data){
+  /* Guard: doar de la camera activă (D5) */
+  if(!activeWindow || frameEl.contentWindow !== activeWindow){
+    console.log('[campaign] nextRoom ignorat — frame stale'); return;
+  }
+  var idx = data ? +data.idx : activeIdx;
+  /* Idempotență (D4) */
+  if(roomDone[idx]){ console.log('[campaign] nextRoom ignorat — idx deja încheiat', idx); return; }
+  if(idx !== activeIdx){ console.log('[campaign] nextRoom idx mismatch ignorat'); return; }
+  clearTimeout(readyTimer);
+  roomDone[idx] = true;
+  totalStars += (data.stars || 0);
+  roomStars[idx] = (data.stars || 0); /* pentru diplomă */
+  var letter = String(data.letter || '').replace(/[^A-Za-z0-9]/g,'').charAt(0).toUpperCase();
+  if(letter) collected.push(letter);
+  setDot(idx,'done');
+  console.log('[campaign] camera',idx,'done. stars=',data.stars,'letter=',letter);
+  if(ADVENTURE){
+    var dest = resolveBranch(idx, data.branch || '*');
+    if(dest === 'end'){
+      owExitUnlocked = true;
+      saveProgress();
+      showOverworld(idx, data); /* overworld cu exit deblocat — player merge la steag */
+    } else {
+      owUnlocked[dest] = true;
+      owTargetIdx = dest;
+      saveProgress();
+      showOverworld(dest, data);
+    }
+  } else {
+    saveProgress();
+    var next = idx + 1;
+    if(next >= N){ clearProgress(); showFinale(); } else { showOverworld(next, data); }
+  }
+};
+
+window.roomReady = function(idx){
+  console.log('[campaign] roomReady',idx);
+  if(+idx !== activeIdx) return;
+  clearTimeout(readyTimer);
+  frameEl.setAttribute('data-room-ready','true'); /* hook pentru tests */
+  var q = MASTER.puzzles[idx] && MASTER.puzzles[idx].question;
+  if(q) voiceSay(q); /* citește întrebarea camerei (D10) */
+};
+
+window.roomError = function(idx, msg){
+  console.warn('[campaign] roomError',idx,msg);
+  /* roomError are semantică ORICÂND (post-ready inclus, D5) */
+  if(!activeWindow || frameEl.contentWindow !== activeWindow) return;
+  if(+idx !== activeIdx) return;
+  if(roomDone[idx]) return;
+  skipRoom(+idx, String(msg||'eroare'));
+};
+
+/* ----- Timeout 4s → skip (T3) ----- */
+function startReadyTimer(idx){
+  clearTimeout(readyTimer);
+  readyTimer = setTimeout(function(){
+    if(roomDone[idx]) return;
+    console.warn('[campaign] timeout 4s — skip',idx);
+    skipRoom(idx,'timeout');
+  }, 4000);
+}
+
+function skipRoom(idx, reason){
+  clearTimeout(readyTimer);
+  roomDone[idx] = true;
+  skipped[idx]  = true;
+  setDot(idx,'done');
+  saveProgress();
+  var style = (MASTER.puzzles[idx]&&(MASTER.puzzles[idx].style||ROTATION[idx%5]))||'?';
+  var code  = style + '\u00b7' + idx;
+  showSkipBanner(idx, code, reason);
+}
+
+/* ----- Montare cameră ----- */
+function mountRoom(idx){
+  activeIdx = idx;
+  var puzzle = MASTER.puzzles[idx];
+  var style  = (puzzle&&puzzle.style) || ROTATION[idx % ROTATION.length];
+  var tpl    = TPL[style];
+  if(!tpl){
+    /* stil negăsit în template-uri — skip imediat */
+    console.warn('[campaign] template lipsă pentru stil',style);
+    skipRoom(idx,'template lipsă: '+style); return;
+  }
+  var camCfg = {
+    title: MASTER.title, player: MASTER.player, color: MASTER.color,
+    style: style, charName: MASTER.charName,
+    story: MASTER.story, finalMessage: MASTER.finalMessage,
+    puzzles: [puzzle],
+    _campaign: {
+      idx: idx, total: N,
+      stars: totalStars, letters: collected.slice(), deadline: null
+    }
+  };
+  /* json cu replace-funcție (D1 + D6) */
+  var json   = JSON.stringify(camCfg).replace(/</g,'\u003c');
+  var srcdoc = tpl.replace(TOKEN, function(){ return json; });
+
+  hideAll();
+  setDot(idx,'active');
+  activeWindow = null;
+  frameEl.removeAttribute('data-room-ready');
+  frameEl.srcdoc = srcdoc;
+  setTimeout(function(){ activeWindow = frameEl.contentWindow; }, 0);
+  startReadyTimer(idx);
+
+  var isLast = (idx === N - 1);
+  document.getElementById('chrome-title').textContent = isLast
+    ? MASTER.title + ' — Ultima cameră!' : MASTER.title;
+  console.log('[campaign] montat camera',idx,'stil',style);
+}
+
+/* ----- Skip banner ----- */
+function showSkipBanner(idx, code, reason){
+  hideAll();
+  var stuckStyle = (MASTER.puzzles[idx] && (MASTER.puzzles[idx].style || ROTATION[idx%5])) || 'classic';
+  document.getElementById('skip-door').innerHTML = doorHtml(stuckStyle, false, true);
+  document.getElementById('skip-code').textContent = 'Cod: ' + code + ' (' + reason + ')';
+  skipEl.classList.add('show');
+  var next = idx + 1;
+  var btn  = document.getElementById('btn-skip');
+  btn.disabled = false;
+  btn.onclick = function(){
+    btn.disabled = true;
+    if(next >= N){ showFinale(); } else { showOverworld(next); }
+  };
+}
+
+/* ----- Final ----- */
+function showFinale(){
+  stopTimer(); stopMusic(); /* jocul s-a încheiat — oprește ceasul + muzica */
+  hideAll(); finaleEl.classList.add('show');
+  var wEl = document.getElementById('fin-word'); wEl.innerHTML = '';
+  collected.forEach(function(l,j){
+    var s = document.createElement('span');
+    s.textContent = l;
+    s.style.animationDelay = (j*0.18)+'s';
+    wEl.appendChild(s);
+  });
+  /* dăle-lacăt pentru camere sărite */
+  Object.keys(skipped).forEach(function(i){
+    var s = document.createElement('span');
+    s.textContent = '\uD83D\uDD12'; /* 🔒 */
+    s.title = 'Camera '+(+i+1)+' sărită';
+    s.style.fontSize = '22px';
+    wEl.appendChild(s);
+  });
+  document.getElementById('fin-stars').textContent = totalStars + ' / ' + (N*3) + ' \u2605';
+  var msg = MASTER.finalMessage || '';
+  var pl  = MASTER.player || '';
+  document.getElementById('fin-msg').textContent = pl ? pl+', '+msg.charAt(0).toLowerCase()+msg.slice(1) : msg;
+  beep(true); confetti();
+  voiceSay(document.getElementById('fin-msg').textContent); /* citește mesajul final (D10) */
+}
+
+/* ----- Diplomă A4 (§Design pct.9) — populată la „Vezi diploma" ----- */
+function _starStr(n){ n = Math.max(0, Math.min(3, n|0)); var s = ''; for(var i=0;i<3;i++) s += i<n ? '\u2605' : '\u2606'; return s; }
+function buildDiploma(){
+  document.getElementById('dipl-name').textContent = (MASTER.player||'').trim() || 'Campion';
+  document.getElementById('dipl-game').textContent = '\u201E' + (MASTER.title||'') + '\u201D';
+  var rooms = document.getElementById('dipl-rooms'); rooms.innerHTML = '';
+  for(var i=0;i<N;i++){
+    var row = document.createElement('div'); row.className = 'dipl-room';
+    var lab = document.createElement('span'); lab.textContent = 'Camera ' + (i+1);
+    var val = document.createElement('span');
+    if(skipped[i]){ val.className = 'rskip'; val.textContent = '\uD83D\uDD12 s\u0103rit\u0103'; }
+    else if(ADVENTURE && !roomDone[i]){ val.className = 'rskip'; val.textContent = '\u2014 neexplorat\u0103'; }
+    else { val.className = 'rstars'; val.textContent = _starStr(roomStars[i]||0); }
+    row.appendChild(lab); row.appendChild(val); rooms.appendChild(row);
+  }
+  var w = document.getElementById('dipl-word'); w.innerHTML = '';
+  collected.forEach(function(l){ var s = document.createElement('span'); s.textContent = l; w.appendChild(s); });
+  Object.keys(skipped).forEach(function(){ var s = document.createElement('span'); s.className = 'lock'; s.textContent = '\uD83D\uDD12'; w.appendChild(s); });
+  var foot = '';
+  try{ foot = new Date().toLocaleDateString('ro-RO', {year:'numeric', month:'long', day:'numeric'}); }catch(e){ foot = ''; }
+  var cre = (MASTER.creator||'').trim(); if(cre) foot += ' \u00b7 creat de ' + cre;
+  var fEl = document.getElementById('dipl-footer'); fEl.textContent = foot;
+  if(_timerExpired){ var ex = document.createElement('div'); ex.className = 'dipl-expired'; ex.textContent = 'timpul a expirat'; fEl.appendChild(ex); }
+}
+function showDiploma(){
+  buildDiploma();
+  finaleEl.classList.remove('show');
+  diplomaEl.classList.add('show'); diplomaEl.setAttribute('aria-hidden','false');
+}
+function hideDiploma(){
+  diplomaEl.classList.remove('show'); diplomaEl.setAttribute('aria-hidden','true');
+  finaleEl.classList.add('show');
+}
+document.getElementById('btn-diploma').onclick = showDiploma;
+document.getElementById('dipl-back').onclick   = hideDiploma;
+document.getElementById('dipl-print').onclick  = function(){ try{ window.print(); }catch(e){} };
+document.getElementById('btn-replay').onclick  = function(){ clearProgress(); location.reload(); };
+
+/* ----- Confetti ----- */
+function confetti(){
+  var colors=[MASTER.color||'#6d28d9','#fbbf24','#34d399','#60a5fa','#f472b6'];
+  for(var i=0;i<90;i++){
+    var c=document.createElement('div'); c.className='confetti';
+    c.style.left=(i*137%100)+'vw'; c.style.background=colors[i%colors.length];
+    c.style.animationDuration=(2.2+(i*53%18)/10)+'s';
+    c.style.animationDelay=((i*31%14)/10)+'s';
+    document.body.appendChild(c);
+  }
+}
+
+var overworldEl = document.getElementById('overworld');
+function hideAll(){
+  voiceCancel(); /* fără replici fantomă la schimbarea scenei (D10) */
+  [introEl,overworldEl,skipEl,finaleEl,diplomaEl].forEach(function(el){ el.classList.remove('show'); });
+}
+
+/* ===== Overworld (S3 pas2 — hartă top-down care înlocuiește coridorul) =====
+ * Strat de NAVIGARE peste #room-frame. Nu schimbă contractul:
+ * mountRoom/nextRoom/roomReady/roomError/skip/resume/finale rămân identice.
+ * Camera done → showOverworld(next) (în loc de showCorridor). */
+var OW_TILE = 40;
+var OW_ROWS = 9;
+var OW_COLS = Math.max(11, Math.min(19, N * 2 + 5));
+var OW_MIDR = OW_ROWS >> 1;
+var owWorld = document.getElementById('ow-world');
+var owWrap  = document.getElementById('ow-wrap');
+var owMap = [], owDoors = [], owExit = { col: OW_COLS - 2, row: OW_MIDR };
+var owPlayer = { col: 1, row: OW_MIDR }, owPlayerEl = null, owTargetIdx = 0, owActive = false;
+
+function owResetPlayer(){ owPlayer.col = 1; owPlayer.row = OW_MIDR; }
+
+function owBuild(){
+  owMap = [];
+  for (var r = 0; r < OW_ROWS; r++){ owMap[r] = []; for (var c = 0; c < OW_COLS; c++){ owMap[r][c] = (r === 0 || c === 0 || r === OW_ROWS - 1 || c === OW_COLS - 1) ? 1 : 0; } }
+  owDoors = [];
+  for (var i = 0; i < N; i++){
+    var col = (N <= 1) ? (OW_COLS >> 1) : (3 + Math.round(i * (OW_COLS - 6) / (N - 1)));
+    var row = OW_MIDR + ((i % 2 === 0) ? -1 : 1) * ((i % 4 < 2) ? 1 : 2);
+    if (row < 1) row = 1; if (row > OW_ROWS - 2) row = OW_ROWS - 2;
+    owDoors.push({ col: col, row: row, idx: i });
+  }
+  owWorld.style.width  = (OW_COLS * OW_TILE) + 'px';
+  owWorld.style.height = (OW_ROWS * OW_TILE) + 'px';
+  var html = '';
+  for (var r2 = 0; r2 < OW_ROWS; r2++) for (var c2 = 0; c2 < OW_COLS; c2++){
+    var cls = owMap[r2][c2] === 1 ? 'ow-wall' : ('ow-floor' + (((r2 + c2) % 2) ? ' alt' : ''));
+    html += '<div class="ow-tile ' + cls + '" style="left:' + (c2 * OW_TILE) + 'px;top:' + (r2 * OW_TILE) + 'px"></div>';
+  }
+  owDoors.forEach(function(d){ html += '<div class="ow-door" id="ow-door-' + d.idx + '" style="left:' + (d.col * OW_TILE) + 'px;top:' + (d.row * OW_TILE) + 'px">' + (d.idx + 1) + '</div>'; });
+  html += '<div class="ow-exit" id="ow-exit" style="left:' + (owExit.col * OW_TILE) + 'px;top:' + (owExit.row * OW_TILE) + 'px">\ud83c\udfc1</div>';
+  html += '<div class="ow-player" id="ow-player" style="left:' + (owPlayer.col * OW_TILE) + 'px;top:' + (owPlayer.row * OW_TILE) + 'px">\ud83e\uddd1</div>';
+  owWorld.innerHTML = html;
+  owPlayerEl = document.getElementById('ow-player');
+}
+
+function owAllDone(){ for (var i = 0; i < N; i++) if (!roomDone[i]) return false; return true; }
+
+function owRefreshDoors(){
+  owDoors.forEach(function(d){
+    var el = document.getElementById('ow-door-' + d.idx); if (!el) return;
+    var done = !!roomDone[d.idx], isSkip = !!skipped[d.idx];
+    var locked = ADVENTURE && !owUnlocked[d.idx] && !done;
+    el.className = 'ow-door' + (done ? ' solved' : '') + (!done && !locked && d.idx === owTargetIdx ? ' target' : '') + (locked ? ' locked' : '');
+    if (isSkip) el.textContent = '\ud83d\udd12';
+    else if (done) el.textContent = (MASTER.puzzles[d.idx].letter || '').trim().toUpperCase() || '\u2713';
+    else if (locked) el.textContent = '\ud83d\udd12';
+    else el.textContent = (d.idx + 1);
+  });
+  var exitOpen = ADVENTURE ? owExitUnlocked : owAllDone();
+  var ex = document.getElementById('ow-exit'); if (ex) ex.className = 'ow-exit' + (exitOpen ? ' open' : '');
+  document.getElementById('ow-hint').textContent = exitOpen
+    ? 'Toate camerele rezolvate! Mergi la steag \ud83c\udfc1 ca s\u0103 evadezi.'
+    : 'Mergi la u\u015fa urm\u0103toare (s\u0103ge\u021bi / WASD / butoane).';
+}
+
+function owCenter(){
+  var vpW = owWrap.clientWidth, vpH = owWrap.clientHeight;
+  var worldW = OW_COLS * OW_TILE, worldH = OW_ROWS * OW_TILE;
+  var px = owPlayer.col * OW_TILE + OW_TILE / 2, py = owPlayer.row * OW_TILE + OW_TILE / 2;
+  var tx = worldW <= vpW ? (vpW - worldW) / 2 : Math.max(vpW - worldW, Math.min(0, vpW / 2 - px));
+  var ty = worldH <= vpH ? (vpH - worldH) / 2 : Math.max(vpH - worldH, Math.min(0, vpH / 2 - py));
+  owWorld.style.transform = 'translate(' + tx + 'px,' + ty + 'px)';
+}
+
+function owRenderPlayer(){ if (owPlayerEl){ owPlayerEl.style.left = (owPlayer.col * OW_TILE) + 'px'; owPlayerEl.style.top = (owPlayer.row * OW_TILE) + 'px'; } owCenter(); }
+
+function owWalkable(col, row){ if (col < 0 || row < 0 || col >= OW_COLS || row >= OW_ROWS) return false; return owMap[row][col] !== 1; }
+
+function owMove(dc, dr){
+  if (!owActive) return;
+  var nc = owPlayer.col + dc, nr = owPlayer.row + dr;
+  if (!owWalkable(nc, nr)) return;
+  owPlayer.col = nc; owPlayer.row = nr; owRenderPlayer(); owCheckEnter();
+}
+
+function owCheckEnter(){
+  for (var i = 0; i < owDoors.length; i++){
+    var d = owDoors[i];
+    if (owPlayer.col === d.col && owPlayer.row === d.row){
+      if (!roomDone[d.idx] && (!ADVENTURE || owUnlocked[d.idx])) owEnterDoor(d.idx);
+      return;
+    }
+  }
+  var canExit = ADVENTURE ? owExitUnlocked : owAllDone();
+  if (owPlayer.col === owExit.col && owPlayer.row === owExit.row && canExit){ owActive = false; clearProgress(); showFinale(); }
+}
+
+function owEnterDoor(idx){ if (!owActive) return; /* idempotență — a doua intrare ignorată (T4/D4) */ owActive = false; mountRoom(idx); }
+
+function showOverworld(targetIdx, data){
+  hideAll();
+  owTargetIdx = targetIdx;
+  owRefreshDoors();
+  owRenderPlayer();
+  owActive = true;
+  overworldEl.classList.add('show');
+  if (data){
+    var s = data.stars || 0;
+    var letter = String(data.letter || '').replace(/[^A-Za-z0-9]/g, '').charAt(0).toUpperCase();
+    var t = (letter ? ('+' + letter + '  ') : '') + (s ? ('+' + s + ' \u2605') : '');
+    var toast = document.getElementById('ow-toast');
+    if (t.trim()){ toast.textContent = t; toast.classList.add('show'); setTimeout(function(){ toast.classList.remove('show'); }, 1600); }
+  }
+  setTimeout(owCenter, 0);
+}
+
+document.addEventListener('keydown', function(e){
+  if (!owActive) return;
+  var m = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0], w:[0,-1], s:[0,1], a:[-1,0], d:[1,0] }[e.key];
+  if (!m) return; e.preventDefault(); owMove(m[0], m[1]);
+});
+document.querySelectorAll('#ow-dpad button[data-d]').forEach(function(b){
+  b.addEventListener('click', function(){ var m = { U:[0,-1], D:[0,1], L:[-1,0], R:[1,0] }[b.getAttribute('data-d')]; if (m) owMove(m[0], m[1]); });
+});
+
+/* Hooks pentru teste (conduc harta fără tastatură) */
+window.__ow = {
+  get state(){ return { player: { col: owPlayer.col, row: owPlayer.row }, target: owTargetIdx, active: owActive, allDone: owAllDone(), owUnlocked: owUnlocked, owExitUnlocked: owExitUnlocked, doors: owDoors.map(function(d){ return { idx: d.idx, col: d.col, row: d.row, solved: !!roomDone[d.idx] }; }) }; },
+  enterDoor: function(i){ var d = owDoors[i]; if (d){ owPlayer.col = d.col; owPlayer.row = d.row; owRenderPlayer(); owCheckEnter(); } },
+  enterExit: function(){ owPlayer.col = owExit.col; owPlayer.row = owExit.row; owRenderPlayer(); owCheckEnter(); }
+};
+
+owBuild();
+
+/* ----- Intro ----- */
+document.getElementById('intro-title').textContent = MASTER.title;
+document.getElementById('chrome-title').textContent = MASTER.title;
+document.title = MASTER.title || document.title;
+var _introStory = (MASTER.player?'Salut, '+MASTER.player+'! ':'')+MASTER.story;
+document.getElementById('intro-story').textContent = _introStory;
+document.getElementById('intro-promise').textContent = N+' camere \u00b7 5 stiluri \u00b7 1 cuvânt magic';
+document.getElementById('btn-start').onclick = function(){
+  unlockAudio(); /* gest direct pe părinte (handlerul global prinde și el, dar e idempotent) */
+  clearProgress(); owResetPlayer();
+  owUnlocked = {0: true}; owExitUnlocked = false; /* reset adventure state la start nou */
+  showOverworld(0);
+  startTimer(); /* ceasul pornește exact la „Începe aventura" (intro necronometrat) */
+  startMusic(); /* muzica ambient pornește odată cu aventura (T10) */
+  voiceSay(_introStory); /* după showOverworld → hideAll a rulat deja, nu mai anulează (D10) */
+};
+
+/* ----- Buton voce în bara chrome (D10) ----- */
+var btnVoice = document.getElementById('btn-voice');
+if(SPEECH && btnVoice){
+  btnVoice.hidden = false;
+  var _syncVoiceBtn = function(){
+    btnVoice.innerHTML = voiceOn ? '&#128266;' : '&#128263;'; /* 🔊 / 🔇 */
+    btnVoice.setAttribute('aria-pressed', voiceOn ? 'true' : 'false');
+    btnVoice.title = voiceOn ? 'Naratiune pornita — apasa ca sa opresti' : 'Naratiune oprita — apasa ca sa pornesti';
+  };
+  _syncVoiceBtn();
+  btnVoice.onclick = function(){
+    voiceOn = !voiceOn;
+    if(!voiceOn) voiceCancel();
+    _syncVoiceBtn();
+  };
+}
+
+/* ----- Buton muzică în bara chrome (T10) ----- */
+var btnMusic = document.getElementById('btn-music');
+if(MUSIC && btnMusic){
+  btnMusic.hidden = false;
+  var _syncMusicBtn = function(){
+    btnMusic.innerHTML = musicOn ? '&#127925;' : '&#128263;'; /* 🎵 / 🔇 */
+    btnMusic.setAttribute('aria-pressed', musicOn ? 'true' : 'false');
+    btnMusic.title = musicOn ? 'Muzica pornita — apasa ca sa opresti' : 'Muzica oprita — apasa ca sa pornesti';
+  };
+  _syncMusicBtn();
+  btnMusic.onclick = function(){
+    musicOn = !musicOn;
+    if(musicOn) startMusic(); else stopMusic();
+    _syncMusicBtn();
+  };
+}
+
+buildDots();
+
+/* ----- Resume la reload (D11) ----- */
+(function tryResume(){
+  if(MASTER._noResume) return; /* preview-ul nu reia niciodată */
+  var saved = safeGet();
+  if(!saved || typeof saved.idx !== 'number' || saved.idx < 0) return;
+  /* restaurăm starea */
+  totalStars = saved.totalStars || 0;
+  collected  = saved.collected  || [];
+  roomStars  = saved.roomStars  || [];
+  skipped    = saved.skipped    || {};
+  Object.keys(skipped).forEach(function(k){ roomDone[+k] = true; setDot(+k,'done'); });
+  if(ADVENTURE){
+    /* Adventure: restore non-contiguous done list (nu bucla liniară 0..idx) */
+    var dl = saved.doneList || [saved.idx];
+    dl.forEach(function(i){ if(i >= 0 && i < N){ roomDone[i] = true; setDot(i,'done'); } });
+    owUnlocked      = saved.owUnlocked     || {0: true};
+    owExitUnlocked  = !!saved.owExitUnlocked;
+    var target = (typeof saved.target === 'number' && saved.target >= 0 && saved.target < N) ? saved.target : 0;
+    owResetPlayer(); showOverworld(target);
+    startTimer(); startMusic();
+    return;
+  }
+  /* Non-adventure: bucla liniară (comportament existent) */
+  var resumeIdx = saved.idx + 1;
+  for(var di=0; di<=saved.idx; di++){ roomDone[di] = true; setDot(di,'done'); }
+  if(resumeIdx >= N){
+    showFinale(); return;
+  }
+  owResetPlayer(); showOverworld(resumeIdx);
+  startTimer(); /* resume → reia ceasul de la deadline-ul absolut salvat */
+  startMusic(); /* resume → reia muzica (T10) */
+})();
+</script>
+</body>
+</html>
