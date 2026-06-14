@@ -361,19 +361,13 @@ var TPL    = {"classic":"\u003c!doctype html>\n\u003chtml lang=\"ro\">\n\u003che
     document.getElementById('intro-title').textContent='Link invalid sau corupt. Regenerează QR-ul din builder.';
     return;
   }
-  var runEl=document.getElementById('run');
-  if(!runEl){document.getElementById('intro-title').textContent='Eroare internă: motor lipsă.';return;}
-  /* ASCII-ify: Brave respinge non-ASCII in comentarii JS (encoding mismatch) */
-  var runCode=runEl.textContent.replace(/[^\x00-\x7F]/g,function(c){
-    return '\\u'+('000'+c.charCodeAt(0).toString(16)).slice(-4);
-  });
-  var s=document.createElement('script');
-  s.textContent=runCode;
-  try { document.body.appendChild(s); }
-  catch(e){ document.getElementById('intro-title').textContent='Eroare browser: '+e.message; }
+  if(typeof window.__runGame!=='function'){document.getElementById('intro-title').textContent='Eroare internă: motor lipsă.';return;}
+  try { window.__runGame(); }
+  catch(e){ document.getElementById('intro-title').textContent='Eroare joc: '+e.message; }
 })();
 </script>
-<script type="text/plain" id="run">
+<script>
+window.__runGame=function(){
 var MASTER=window.MASTER;
 /*
  * ASCII DIAGRAM — contractul parent.*:
@@ -1063,6 +1057,7 @@ buildDots();
   startTimer(); /* resume → reia ceasul de la deadline-ul absolut salvat */
   startMusic(); /* resume → reia muzica (T10) */
 })();
+}; /* end __runGame */
 </script>
 </body>
 </html>
