@@ -243,13 +243,28 @@ choice=1/opțiune); `data-fb`/`data-bkey` handler în input listener; `adventure
 
 Verificat: smoke 35/35 (4 teste noi: branch-jump, resume non-contiguu, regression non-adventure, tf branch).
 
-## Iterația 3 — Joc-în-URL + QR
-*(depinde de măsurarea dimensiunii JSON comprimate)*
+## Iterația 3 — Joc-în-URL + QR ✅ LIVRAT (2026-06-14)
 
-- `gameHTML(cfg)` → URL data: sau LZW/gzip → QR code printabil.
-- Open Question 2 din design doc: câte puzzle-uri încap în 2KB (URL QR L)?
-- Alternative: GitHub Pages export automat; sau link scurt cu backend minimal.
-- Referință: design doc §NOT in scope "Joc-în-URL + QR".
+**Scope livrat:**
+- [x] **Stage 1 — Compresie URL**: `deflateToBase64url`/`inflateFromBase64url` (CompressionStream native,
+  offline, `file://`). `CS_OK` guard. `SNIP.compressJs` cu helpers inflate (doubled backslashes).
+- [x] **Stage 2 — Refactor `campaignShell`**: parametrizat `bootMode='inline'|'hash'`. Zero schimbare
+  de comportament pentru inline (35/35 smoke). `chrome-title` + `document.title` setate din MASTER.
+- [x] **Stage 3 — `playerHTML()` + boot din hash**: player universal (toate 5 motoare); async IIFE
+  (corect `(async function(){...})()`) decomprimă hash → setează MASTER → apendează orchestratorul
+  din `<script type="text/plain" id="run">`. No-hash → "Niciun joc în acest link."
+- [x] **Stage 4 — Encoder QR**: GF(256), Reed-Solomon, byte mode, ECC L, auto-versiune 1-22,
+  selecție mască + BCH format/version. `makeQrSvg(text, opts)` → SVG string sau `null`.
+- [x] **Stage 5 — UI builder**: fieldset „Distribuie (link+QR)", `#btnShare`/`#btnCopyLink`/
+  `#btnDownloadPlayer`/`#btnPrintQr`, `#qrBox`, `#qrCard` (print A4). `baseUrl` în state
+  (deleted din `cleanState()` → nu intră în payload). Butoane disabled dacă `!CS_OK`.
+- [x] **Stage 6 — Docs**: 41/41 smoke, TODOS/AGENTS actualizate.
+
+**DEFER** (fast-follow): Import-din-hash în builder (`escape-builder.html#hash` → editabil).
+Reutilizează inflate+Save/Load; adaugă cale async la boot-ul builder (azi sincron).
+
+Verificat: smoke 41/41. Capabilitate: 12+ puzzle-uri → ~636B → QR v10 L; 30+ puzzle-uri → ~750B.
+Scan manual cu telefon real: TODO (notat în HANDOFF).
 
 ---
 

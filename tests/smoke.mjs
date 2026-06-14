@@ -1656,3 +1656,152 @@ test.describe('Campanie E2E @campanie', () => {
     });
 
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// SECTIUNEA 5 — SHARE (link + QR + player.html) @share
+// ═══════════════════════════════════════════════════════════════════════
+
+test.describe('Share: link + QR + player @share', () => {
+
+  test('@share compresie round-trip: inflate(deflate(s)) === s', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(fileURL('escape-builder.html'));
+    const ok = await page.evaluate(async () => {
+      if (typeof deflateToBase64url !== 'function') return 'missing deflate';
+      if (typeof inflateFromBase64url !== 'function') return 'missing inflate';
+      const s = JSON.stringify({ title: 'Test', puzzles: [{ question: 'x', answer: '42' }] });
+      const compressed = await deflateToBase64url(s);
+      if (typeof compressed !== 'string' || compressed.length === 0) return 'empty compressed';
+      const decompressed = await inflateFromBase64url(compressed);
+      return decompressed === s ? 'ok' : 'mismatch';
+    });
+    expect(ok, 'round-trip result').toBe('ok');
+    expect(errors).toHaveLength(0);
+  });
+
+  test('@share QR structural: makeQrSvg produce SVG valid', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(fileURL('escape-builder.html'));
+    const result = await page.evaluate(() => {
+      if (typeof makeQrSvg !== 'function') return { err: 'makeQrSvg missing' };
+      const svg = makeQrSvg('https://example.com/play.html#abc123');
+      if (!svg) return { err: 'null result' };
+      return { hasViewBox: svg.includes('viewBox'), hasPath: svg.includes('<path'), len: svg.length };
+    });
+    expect(result.err, 'error').toBeUndefined();
+    expect(result.hasViewBox, 'viewBox').toBe(true);
+    expect(result.hasPath, '<path').toBe(true);
+    expect(result.len, 'svg length').toBeGreaterThan(100);
+    expect(errors).toHaveLength(0);
+  });
+
+  test('@share playerHTML() genereaza HTML cu inflate + script run + TPL', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(fileURL('escape-builder.html'));
+    const result = await page.evaluate(() => {
+      if (typeof playerHTML !== 'function') return { err: 'playerHTML missing' };
+      const html = playerHTML();
+      return {
+        hasInflate: html.includes('inflateFromBase64url'),
+        hasRunScript: html.includes('text/plain'),
+        hasTPL: html.includes('var TPL'),
+        len: html.length
+      };
+    });
+    expect(result.err, 'error').toBeUndefined();
+    expect(result.hasInflate, 'inflate helper').toBe(true);
+    expect(result.hasRunScript, 'text/plain run script').toBe(true);
+    expect(result.hasTPL, 'var TPL').toBe(true);
+    expect(result.len).toBeGreaterThan(5000);
+    expect(errors).toHaveLength(0);
+  });
+
+  test('@share player porneste din hash — campanie 1 camera, final vizibil', async ({ page }) => {
+    test.setTimeout(60000);
+    const errors = trackErrors(page);
+    await page.goto(fileURL('escape-builder.html'));
+    const { playerHtml, hash } = await page.evaluate(async () => {
+      const cfg = {
+        title: 'Test Player', player: '', color: '#6d28d9', style: 'campaign', creator: '',
+        charName: 'Alex', voice: false, music: false, adventure: false, timerMin: 0,
+        puzzles: [{ title: 'P1', type: 'free', question: 'Cat fac 1+1?', answer: '2',
+          tfAnswer: 'Adevarat', choices: '', hint: '', letter: 'A', style: 'classic', branch: {} }],
+        story: 'Povestea', finalMessage: 'Bravo!'
+      };
+      const compressed = await deflateToBase64url(JSON.stringify(cfg));
+      return { playerHtml: playerHTML(), hash: compressed };
+    });
+
+    const tmpPath = join(ROOT, 'tests', '.tmp-player.html');
+    writeFileSync(tmpPath, playerHtml);
+    const gp = await page.context().newPage();
+    const gameErrors = trackErrors(gp);
+    const consoleLogs = [];
+    gp.on('console', m => consoleLogs.push(m.type() + ': ' + m.text()));
+    try {
+      await gp.goto('file://' + tmpPath + '#' + hash);
+      await gp.waitForFunction(() => !!window.MASTER, { timeout: 10000 }).catch(e => { throw new Error('MASTER not set. Console: ' + consoleLogs.slice(0,5).join(' | ')); });
+      const title = await gp.evaluate(() => window.MASTER.title);
+      expect(title, 'MASTER.title').toBe('Test Player');
+
+      await gp.locator('#btn-start').click();
+      /* after start, overworld is shown; navigate to room 0 */
+      await gp.waitForFunction(() => window.__ow && window.__ow.state.active, null, { timeout: 8000 });
+      await gp.evaluate(() => window.__ow.enterDoor(0));
+      await gp.waitForFunction(
+        () => document.getElementById('room-frame')?.hasAttribute('data-room-ready'),
+        null, { timeout: 8000 }
+      );
+      const ifl = gp.frameLocator('#room-frame');
+      await ifl.locator('#btnStart').click();
+      await ifl.locator('#answers input[type=text]').fill('2');
+      await ifl.locator('#answers button:text("Verifica")').click();
+      await gp.waitForTimeout(1200);
+      await gp.waitForFunction(() => {
+        const fin = document.getElementById('finale');
+        return fin && fin.classList.contains('show');
+      }, { timeout: 10000 });
+    } finally {
+      await gp.close();
+      try { unlinkSync(tmpPath); } catch (_) {}
+    }
+    expect(gameErrors, 'Game errors:\n' + gameErrors.join('\n')).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+  });
+
+  test('@share player fara hash — afiseaza mesaj niciun joc', async ({ page }) => {
+    const errors = trackErrors(page);
+    await page.goto(fileURL('escape-builder.html'));
+    const playerHtml = await page.evaluate(() => playerHTML());
+    const tmpPath = join(ROOT, 'tests', '.tmp-player-empty.html');
+    writeFileSync(tmpPath, playerHtml);
+    const gp = await page.context().newPage();
+    try {
+      await gp.goto('file://' + tmpPath);
+      await gp.waitForTimeout(600);
+      const txt = await gp.locator('#intro-title').textContent({ timeout: 3000 }).catch(() => '');
+      expect(txt, 'mesaj fara hash').toContain('Niciun joc');
+    } finally {
+      await gp.close();
+      try { unlinkSync(tmpPath); } catch (_) {}
+    }
+    expect(errors).toHaveLength(0);
+  });
+
+  test('@share share UI: butoane share disabled fara CompressionStream', async ({ page }) => {
+    await page.addInitScript(() => {
+      delete window.CompressionStream;
+      delete window.DecompressionStream;
+    });
+    const errors = trackErrors(page);
+    await page.goto(fileURL('escape-builder.html'));
+    const shareDisabled = await page.locator('#btnShare').isDisabled();
+    const copyDisabled  = await page.locator('#btnCopyLink').isDisabled();
+    expect(shareDisabled, 'btnShare disabled').toBe(true);
+    expect(copyDisabled,  'btnCopyLink disabled').toBe(true);
+    const dlEnabled = await page.locator('#btnDownloadPlayer').isEnabled();
+    expect(dlEnabled, 'btnDownloadPlayer enabled').toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+});

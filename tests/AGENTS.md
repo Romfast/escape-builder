@@ -5,7 +5,7 @@ Smoke + regresie + campanie E2E pentru jocurile generate. Verifică faptic: fiec
 până la ecranul final, fără erori de consolă.
 
 ## Ownership
-- `tests/smoke.mjs` — unicul fișier de teste (~35 teste).
+- `tests/smoke.mjs` — unicul fișier de teste (~41 teste).
 - `playwright.config.mjs` (la root, **gitignored**) — config dev.
 
 ## Local Contracts
@@ -13,27 +13,30 @@ până la ecranul final, fără erori de consolă.
   zero-dependențe. Instalarea dev e o singură dată: `npm i -D @playwright/test && npx playwright install chromium`.
 - **Fără npm scripts** — se rulează direct cu `npx`.
 - **Teste pe `file://`** — helper-ul `fileURL(name)` mapează cale relativă la `file://`; campania scrie
-  HTML temp generat via builder (`gameHTML`) și-l încarcă de pe `file://`.
+  HTML temp generat via builder (`gameHTML`) și-l încarcă de pe `file://`. Testele `@share` scriu
+  player HTML temp în `tests/.tmp-player*.html` (deleted în `finally`).
 - **Zero erori consolă = invariant.** `trackErrors(page)` colectează `console.error` + `pageerror`;
   fiecare test asertează `errors.length === 0` la final.
-- **Tag-uri:** `@regresie` (16 — exemplu-*.html + edge cases + mobil 320px + regenerare via gameHTML +
-  stil top-level invalid la import + bomberman gameplay + bomberman rază/powerup-uri) și `@campanie`
-  (21 — intro→hartă→camere→final, resume, cameră moartă, idempotență ușă, `$`/`$&`, beep, mobil,
-  audio S1, voce/narațiune D10, a11y tap/aria/reduced-motion, navigare overworld, timer calm T10,
-  muzica ambient T10, diploma A4, adventure branch-jump, adventure resume non-contiguu,
-  adventure regression non-adventure, adventure branch tf).
-- **Status țintă: 35/35 PASS.**
+- **Tag-uri:** `@regresie` (16), `@campanie` (21), `@share` (6 — Iterația 3):
+  - `@share compresie round-trip` — deflate/inflate builder
+  - `@share QR structural` — makeQrSvg SVG valid
+  - `@share playerHTML()` — structura HTML player
+  - `@share player porneste din hash` — campanie 1 cameră din URL hash; folosește `__ow.enterDoor(0)`
+  - `@share player fara hash` — mesaj „Niciun joc"
+  - `@share share UI` — butoane disabled fără CompressionStream
+- **Status țintă: 41/41 PASS.**
 
 ## Work Guidance
 - După modificări la motoare (`escape-builder.html`): rulează suita completă; extinde `@regresie` dacă
-  adaugi/schimbi un stil, `@campanie` pentru contractul de montare.
+  adaugi/schimbi un stil, `@campanie` pentru contractul de montare, `@share` pentru Iterația 3.
 - Nu testa pe screenshot-uri de pixeli — asertează stare/text/erori.
 
 ## Verification
 ```bash
-npx playwright test tests/smoke.mjs                    # 35/35
-npx playwright test tests/smoke.mjs --grep @regresie
-npx playwright test tests/smoke.mjs --grep @campanie
+npx playwright test tests/smoke.mjs                    # 41/41
+npx playwright test tests/smoke.mjs --grep @regresie   # 16
+npx playwright test tests/smoke.mjs --grep @campanie   # 21
+npx playwright test tests/smoke.mjs --grep @share      # 6
 ```
 
 ## Child DOX Index

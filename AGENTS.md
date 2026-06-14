@@ -20,9 +20,10 @@ sursa de adevăr tehnică pentru agenți.
 python3 -m http.server 8000
 
 # Teste (Playwright; fără package.json commitat — vezi tests/AGENTS.md):
-npx playwright test tests/smoke.mjs                    # suita completă: 35/35
+npx playwright test tests/smoke.mjs                    # suita completă: 41/41
 npx playwright test tests/smoke.mjs --grep @regresie   # regresie: 16
 npx playwright test tests/smoke.mjs --grep @campanie   # campanie E2E: 21
+npx playwright test tests/smoke.mjs --grep @share      # Iterația 3: 6
 ```
 
 ## Durable Rules (repo-wide)
@@ -30,11 +31,12 @@ npx playwright test tests/smoke.mjs --grep @campanie   # campanie E2E: 21
 - **Zero dependențe.** Produsul (fișierele `*.html`) e vanilla HTML/CSS/JS, merge offline de pe
   `file://`. `node_modules/`, `package.json`, `playwright.config.mjs`, `scratch/`, `test-results/`
   sunt **gitignored** — doar dev tooling, nu fac parte din produs.
-- **Un singur fișier.** Toată aplicația trăiește în `escape-builder.html` (~1960 linii), pe secțiuni
+- **Un singur fișier.** Toată aplicația trăiește în `escape-builder.html` (~3200 linii), pe secțiuni
   comentate: `stare` · `editor` · `preview` · `template-urile jocului exportat`.
 - **Dispatch.** `gameHTML(cfg)` rutează pe `cfg.style` către 6 motoare:
   `gameClassic · gameTerminal · gameArcade · gameChat · gamePoint · gameCampaign`. Fiecare returnează
-  un string HTML complet, standalone.
+  un string HTML complet, standalone. `playerHTML()` generează player universal (hash-mode, toate 5
+  motoare inline, MASTER din `location.hash` comprimat deflate-raw+base64url).
 - **Cod partajat = blast radius global.** `libJS(cfg)` (`CFG`, `norm`, `checkAnswer`, `starsFor`,
   `finalWord`, `beep`, `confetti`) și `SNIP.*` (`baseCss`, modal, ecran final) sunt injectate în
   TOATE motoarele. O schimbare aici → verifică fiecare stil în preview înainte de commit.
